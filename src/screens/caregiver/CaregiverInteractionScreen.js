@@ -1,0 +1,614 @@
+// Caregiver Interaction Screen
+import React, { useState } from 'react';
+import { 
+  View, 
+  Text, 
+  StyleSheet, 
+  SafeAreaView,
+  ScrollView,
+  TouchableOpacity,
+  TextInput,
+  Linking,
+  Alert,
+  Platform,
+} from 'react-native';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { LargeButton, AccessibleInput } from '../../components/common';
+import { colors, typography, spacing, borderRadius, shadows } from '../../theme';
+
+const CaregiverInteractionScreen = ({ navigation, route }) => {
+  const { requestId, request } = route.params || {};
+  
+  const [notes, setNotes] = useState('');
+  const [status, setStatus] = useState('in_progress');
+
+  // Use actual request data if available, otherwise use default
+  const seniorDetails = request ? {
+    name: request.seniorName || 'Senior',
+    age: request.seniorAge || 'N/A',
+    phone: request.seniorPhone || '+91 98765 43210',
+    address: request.seniorAddress || request.address || '123, Green Park, New Delhi',
+    emergencyContact: request.emergencyContact || '+91 87654 32109',
+    helpType: request.helpType || request.category || 'Help Request',
+    description: request.description || request.message || 'Needs assistance',
+    medicalInfo: request.medicalInfo || 'Not provided',
+  } : {
+    name: 'Sharma Ji',
+    age: 72,
+    phone: '+91 98765 43210',
+    address: '123, Green Park, New Delhi',
+    emergencyContact: '+91 87654 32109',
+    helpType: 'Daily Assistance',
+    description: 'Needs help with medicine pickup from nearby pharmacy',
+    medicalInfo: 'Diabetes, Blood Pressure',
+  };
+
+  const handleCall = () => {
+    const phoneNumber = seniorDetails.phone.replace(/\s/g, '');
+    const phoneUrl = Platform.OS === 'ios' 
+      ? `telprompt:${phoneNumber}` 
+      : `tel:${phoneNumber}`;
+    
+    Linking.canOpenURL(phoneUrl)
+      .then(supported => {
+        if (supported) {
+          return Linking.openURL(phoneUrl);
+        } else {
+          Alert.alert('Error', 'Phone calls are not supported on this device');
+        }
+      })
+      .catch(err => {
+        console.error('Call error:', err);
+        Alert.alert('Error', 'Could not initiate call');
+      });
+  };
+
+  const handleChat = () => {
+    // Open WhatsApp or SMS
+    const phoneNumber = seniorDetails.phone.replace(/\s/g, '').replace('+', '');
+    
+    Alert.alert(
+      'Chat with Senior',
+      'Choose how you want to message:',
+      [
+        {
+          text: 'WhatsApp',
+          onPress: () => {
+            const whatsappUrl = `whatsapp://send?phone=${phoneNumber}&text=Hello, I am your volunteer from SaathiCircle. How can I help you?`;
+            Linking.canOpenURL(whatsappUrl)
+              .then(supported => {
+                if (supported) {
+                  return Linking.openURL(whatsappUrl);
+                } else {
+                  Alert.alert('Error', 'WhatsApp is not installed');
+                }
+              })
+              .catch(err => Alert.alert('Error', 'Could not open WhatsApp'));
+          }
+        },
+        {
+          text: 'SMS',
+          onPress: () => {
+            const smsUrl = Platform.OS === 'ios'
+              ? `sms:${seniorDetails.phone}`
+              : `sms:${seniorDetails.phone}?body=Hello from SaathiCircle volunteer`;
+            Linking.openURL(smsUrl).catch(err => 
+              Alert.alert('Error', 'Could not open messaging app')
+            );
+          }
+        },
+        { text: 'Cancel', style: 'cancel' }
+      ]
+    );
+  };
+
+  const handleLocation = () => {
+    const address = encodeURIComponent(seniorDetails.address);
+    
+    Alert.alert(
+      'Open Location',
+      'Choose maps app:',
+      [
+        {
+          text: 'Google Maps',
+          onPress: () => {
+            const googleMapsUrl = Platform.OS === 'ios'
+              ? `comgooglemaps://?q=${address}`
+              : `geo:0,0?q=${address}`;
+            
+            Linking.canOpenURL(googleMapsUrl)
+              .then(supported => {
+                if (supported) {
+                  return Linking.openURL(googleMapsUrl);
+                } else {
+                  // Fallback to web Google Maps
+                  return Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${address}`);
+                }
+              })
+              .catch(err => {
+                Linking.openURL(`https://www.google.com/maps/search/?api=1&query=${address}`);
+              });
+          }
+        },
+        {
+          text: 'Apple Maps',
+          onPress: () => {
+            const appleMapsUrl = `maps:0,0?q=${address}`;
+            Linking.openURL(appleMapsUrl).catch(err => {
+              // Fallback to web
+              Linking.openURL(`https://maps.apple.com/?q=${address}`);
+            });
+          }
+        },
+        { text: 'Cancel', style: 'cancel' }
+      ]
+    );
+  };
+
+  const handleMarkResolved = () => {
+    Alert.alert(
+      'Mark as Resolved',
+      'Are you sure you want to mark this request as resolved?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Yes, Resolve',
+          onPress: () => {
+            Alert.alert('Success', 'Request marked as resolved!');
+            navigation.goBack();
+          }
+        }
+      ]
+    );
+  };
+
+  const handleEscalate = () => {
+    Alert.alert(
+      'Escalate to Admin',
+      'Please select a reason for escalation:',
+      [
+        {
+          text: 'Medical Emergency',
+          onPress: () => confirmEscalation('Medical Emergency')
+        },
+        {
+          text: 'Senior Not Responding',
+          onPress: () => confirmEscalation('Senior Not Responding')
+        },
+        {
+          text: 'Need Additional Help',
+          onPress: () => confirmEscalation('Need Additional Help')
+        },
+        {
+          text: 'Safety Concern',
+          onPress: () => confirmEscalation('Safety Concern')
+        },
+        { text: 'Cancel', style: 'cancel' }
+      ]
+    );
+  };
+
+  const confirmEscalation = (reason) => {
+    Alert.alert(
+      'Confirm Escalation',
+      `This request will be escalated to admin with reason: "${reason}"\n\nAn admin will be notified immediately.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Escalate Now',
+          style: 'destructive',
+          onPress: () => {
+            // In a real app, this would send to Firebase/backend
+            Alert.alert(
+              'Escalated',
+              'This request has been escalated to the admin team. They will contact you shortly.',
+              [{ text: 'OK', onPress: () => navigation.goBack() }]
+            );
+          }
+        }
+      ]
+    );
+  };
+
+  return (
+    <SafeAreaView style={styles.safeArea}>
+      {/* Header */}
+      <View style={styles.header}>
+        <TouchableOpacity 
+          onPress={() => navigation.goBack()}
+          style={styles.backButton}
+        >
+          <MaterialCommunityIcons
+            name="arrow-left"
+            size={28}
+            color={colors.neutral.black}
+          />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Senior Details</Text>
+        <TouchableOpacity style={styles.moreButton}>
+          <MaterialCommunityIcons
+            name="dots-vertical"
+            size={28}
+            color={colors.neutral.black}
+          />
+        </TouchableOpacity>
+      </View>
+
+      <ScrollView 
+        style={styles.scrollView}
+        contentContainerStyle={styles.scrollContent}
+      >
+        {/* Senior Profile Card */}
+        <View style={[styles.profileCard, shadows.md]}>
+          <View style={styles.profileHeader}>
+            <View style={styles.avatar}>
+              <MaterialCommunityIcons
+                name="account"
+                size={48}
+                color={colors.primary.main}
+              />
+            </View>
+            <View style={styles.profileInfo}>
+              <Text style={styles.seniorName}>{seniorDetails.name}</Text>
+              <Text style={styles.seniorAge}>Age: {seniorDetails.age} years</Text>
+            </View>
+            <View style={styles.statusBadge}>
+              <Text style={styles.statusText}>In Progress</Text>
+            </View>
+          </View>
+
+          {/* Quick Actions */}
+          <View style={styles.quickActions}>
+            <TouchableOpacity 
+              style={[styles.actionButton, styles.callAction]}
+              onPress={handleCall}
+            >
+              <MaterialCommunityIcons
+                name="phone"
+                size={24}
+                color={colors.neutral.white}
+              />
+              <Text style={styles.actionText}>Call</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity 
+              style={[styles.actionButton, styles.chatAction]}
+              onPress={handleChat}
+            >
+              <MaterialCommunityIcons
+                name="message-text"
+                size={24}
+                color={colors.neutral.white}
+              />
+              <Text style={styles.actionText}>Chat</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity 
+              style={[styles.actionButton, styles.mapAction]}
+              onPress={handleLocation}
+            >
+              <MaterialCommunityIcons
+                name="map-marker"
+                size={24}
+                color={colors.neutral.white}
+              />
+              <Text style={styles.actionText}>Location</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* Help Request Details */}
+        <View style={[styles.detailsCard, shadows.sm]}>
+          <Text style={styles.sectionTitle}>Help Request</Text>
+          
+          <View style={styles.detailRow}>
+            <MaterialCommunityIcons
+              name="help-circle"
+              size={24}
+              color={colors.primary.main}
+            />
+            <View style={styles.detailContent}>
+              <Text style={styles.detailLabel}>Type</Text>
+              <Text style={styles.detailValue}>{seniorDetails.helpType}</Text>
+            </View>
+          </View>
+
+          <View style={styles.detailRow}>
+            <MaterialCommunityIcons
+              name="text"
+              size={24}
+              color={colors.primary.main}
+            />
+            <View style={styles.detailContent}>
+              <Text style={styles.detailLabel}>Description</Text>
+              <Text style={styles.detailValue}>{seniorDetails.description}</Text>
+            </View>
+          </View>
+        </View>
+
+        {/* Contact Information */}
+        <View style={[styles.detailsCard, shadows.sm]}>
+          <Text style={styles.sectionTitle}>Contact Information</Text>
+          
+          <View style={styles.detailRow}>
+            <MaterialCommunityIcons
+              name="phone"
+              size={24}
+              color={colors.secondary.green}
+            />
+            <View style={styles.detailContent}>
+              <Text style={styles.detailLabel}>Phone</Text>
+              <Text style={styles.detailValue}>{seniorDetails.phone}</Text>
+            </View>
+          </View>
+
+          <View style={styles.detailRow}>
+            <MaterialCommunityIcons
+              name="map-marker"
+              size={24}
+              color={colors.accent.orange}
+            />
+            <View style={styles.detailContent}>
+              <Text style={styles.detailLabel}>Address</Text>
+              <Text style={styles.detailValue}>{seniorDetails.address}</Text>
+            </View>
+          </View>
+
+          <View style={styles.detailRow}>
+            <MaterialCommunityIcons
+              name="phone-alert"
+              size={24}
+              color={colors.accent.red}
+            />
+            <View style={styles.detailContent}>
+              <Text style={styles.detailLabel}>Emergency Contact</Text>
+              <Text style={styles.detailValue}>{seniorDetails.emergencyContact}</Text>
+            </View>
+          </View>
+        </View>
+
+        {/* Medical Information */}
+        <View style={[styles.medicalCard, shadows.sm]}>
+          <View style={styles.medicalHeader}>
+            <MaterialCommunityIcons
+              name="medical-bag"
+              size={24}
+              color={colors.accent.red}
+            />
+            <Text style={styles.medicalTitle}>Medical Information</Text>
+          </View>
+          <Text style={styles.medicalText}>{seniorDetails.medicalInfo}</Text>
+        </View>
+
+        {/* Notes Section */}
+        <View style={[styles.notesCard, shadows.sm]}>
+          <Text style={styles.sectionTitle}>Notes</Text>
+          <TextInput
+            style={styles.notesInput}
+            value={notes}
+            onChangeText={setNotes}
+            placeholder="Add notes about this interaction..."
+            placeholderTextColor={colors.neutral.darkGray}
+            multiline
+            numberOfLines={4}
+          />
+        </View>
+
+        {/* Action Buttons */}
+        <View style={styles.actionButtons}>
+          <LargeButton
+            title="Mark as Resolved"
+            onPress={handleMarkResolved}
+            icon="check-circle"
+            variant="secondary"
+            size="xl"
+            style={styles.resolveButton}
+          />
+
+          <TouchableOpacity 
+            style={styles.escalateButton}
+            onPress={handleEscalate}
+          >
+            <MaterialCommunityIcons
+              name="arrow-up-circle"
+              size={24}
+              color={colors.accent.red}
+            />
+            <Text style={styles.escalateText}>Escalate to NGO/Admin</Text>
+          </TouchableOpacity>
+        </View>
+      </ScrollView>
+    </SafeAreaView>
+  );
+};
+
+const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: colors.neutral.lightGray,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: colors.neutral.white,
+    padding: spacing.md,
+    ...shadows.sm,
+  },
+  backButton: {
+    padding: spacing.sm,
+  },
+  headerTitle: {
+    fontSize: typography.sizes.lg,
+    fontWeight: typography.weights.semiBold,
+    color: colors.neutral.black,
+  },
+  moreButton: {
+    padding: spacing.sm,
+  },
+  scrollView: {
+    flex: 1,
+  },
+  scrollContent: {
+    padding: spacing.md,
+    paddingBottom: spacing.xxl,
+  },
+  profileCard: {
+    backgroundColor: colors.neutral.white,
+    borderRadius: borderRadius.lg,
+    padding: spacing.lg,
+    marginBottom: spacing.md,
+  },
+  profileHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: spacing.lg,
+  },
+  avatar: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: colors.primary.light,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  profileInfo: {
+    flex: 1,
+    marginLeft: spacing.md,
+  },
+  seniorName: {
+    fontSize: typography.sizes.xl,
+    fontWeight: typography.weights.bold,
+    color: colors.neutral.black,
+  },
+  seniorAge: {
+    fontSize: typography.sizes.md,
+    color: colors.neutral.darkGray,
+    marginTop: spacing.xs,
+  },
+  statusBadge: {
+    backgroundColor: colors.accent.orange,
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.sm,
+    borderRadius: borderRadius.sm,
+  },
+  statusText: {
+    fontSize: typography.sizes.xs,
+    fontWeight: typography.weights.semiBold,
+    color: colors.neutral.white,
+  },
+  quickActions: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+  },
+  actionButton: {
+    alignItems: 'center',
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.lg,
+    borderRadius: borderRadius.md,
+    minWidth: 90,
+  },
+  callAction: {
+    backgroundColor: colors.secondary.green,
+  },
+  chatAction: {
+    backgroundColor: colors.primary.main,
+  },
+  mapAction: {
+    backgroundColor: colors.accent.orange,
+  },
+  actionText: {
+    fontSize: typography.sizes.sm,
+    fontWeight: typography.weights.medium,
+    color: colors.neutral.white,
+    marginTop: spacing.xs,
+  },
+  detailsCard: {
+    backgroundColor: colors.neutral.white,
+    borderRadius: borderRadius.lg,
+    padding: spacing.lg,
+    marginBottom: spacing.md,
+  },
+  sectionTitle: {
+    fontSize: typography.sizes.lg,
+    fontWeight: typography.weights.semiBold,
+    color: colors.neutral.black,
+    marginBottom: spacing.md,
+  },
+  detailRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: spacing.md,
+  },
+  detailContent: {
+    flex: 1,
+    marginLeft: spacing.md,
+  },
+  detailLabel: {
+    fontSize: typography.sizes.sm,
+    color: colors.neutral.darkGray,
+  },
+  detailValue: {
+    fontSize: typography.sizes.md,
+    color: colors.neutral.black,
+    marginTop: spacing.xs,
+  },
+  medicalCard: {
+    backgroundColor: '#FFF5F5',
+    borderRadius: borderRadius.lg,
+    padding: spacing.lg,
+    marginBottom: spacing.md,
+    borderWidth: 1,
+    borderColor: '#FFCDD2',
+  },
+  medicalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: spacing.sm,
+  },
+  medicalTitle: {
+    fontSize: typography.sizes.lg,
+    fontWeight: typography.weights.semiBold,
+    color: colors.accent.red,
+    marginLeft: spacing.sm,
+  },
+  medicalText: {
+    fontSize: typography.sizes.md,
+    color: colors.neutral.black,
+  },
+  notesCard: {
+    backgroundColor: colors.neutral.white,
+    borderRadius: borderRadius.lg,
+    padding: spacing.lg,
+    marginBottom: spacing.md,
+  },
+  notesInput: {
+    backgroundColor: colors.neutral.lightGray,
+    borderRadius: borderRadius.md,
+    padding: spacing.md,
+    fontSize: typography.sizes.md,
+    color: colors.neutral.black,
+    minHeight: 100,
+    textAlignVertical: 'top',
+  },
+  actionButtons: {
+    marginTop: spacing.md,
+  },
+  resolveButton: {
+    marginBottom: spacing.md,
+  },
+  escalateButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: spacing.md,
+  },
+  escalateText: {
+    fontSize: typography.sizes.md,
+    color: colors.accent.red,
+    fontWeight: typography.weights.medium,
+    marginLeft: spacing.sm,
+  },
+});
+
+export default CaregiverInteractionScreen;

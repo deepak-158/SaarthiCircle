@@ -1,0 +1,30 @@
+{
+  "expo": {
+    "name": "SaathiCircle",
+    "slug": "saathicircle",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "scheme": "saathicircle",
+    "newArchEnabled": true,
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.saathicircle.app"
+    },
+    "android": {
+      "package": "com.saathicircle.app",
+      "permissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.VIBRATE"
+      ]
+    },
+    "plugins": [
+      "expo-asset",
+      "expo-font"
+    ]
+  }
+}
