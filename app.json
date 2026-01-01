@@ -29,16 +29,10 @@
       },
       "permissions": [
         "android.permission.RECORD_AUDIO",
-        "android.permission.ACCESS_FINE_LOCATION",
         "android.permission.VIBRATE",
-        "android.permission.CALL_PHONE",
-        "android.permission.SEND_SMS"
+        "android.permission.CALL_PHONE"
       ]
     },
-    "plugins": [
-      "expo-asset",
-      "expo-font"
-    ],
     "extra": {
       "eas": {
         "projectId": "d4162acb-32a7-42f3-9944-2700cbf7908e"

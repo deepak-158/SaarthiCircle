@@ -6,8 +6,6 @@ import { StatusBar, LogBox, View, Text, ActivityIndicator, StyleSheet } from 're
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as Font from 'expo-font';
-import { MaterialCommunityIcons, Ionicons, FontAwesome5 } from '@expo/vector-icons';
 
 // Navigators
 import {
@@ -29,28 +27,14 @@ LogBox.ignoreLogs([
 
 const RootStack = createNativeStackNavigator();
 
-// Function to load all required fonts including icons
-const loadFonts = async () => {
-  await Font.loadAsync({
-    ...MaterialCommunityIcons.font,
-    ...Ionicons.font,
-    ...FontAwesome5.font,
-  });
-};
-
 const App = () => {
   const [isLoading, setIsLoading] = useState(true);
-  const [fontsLoaded, setFontsLoaded] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [userRole, setUserRole] = useState(null);
 
   useEffect(() => {
     async function prepare() {
       try {
-        // Load fonts
-        await loadFonts();
-        setFontsLoaded(true);
-        
         // Check auth status
         await checkAuthStatus();
       } catch (e) {
@@ -112,8 +96,8 @@ const App = () => {
     }
   };
 
-  // Show loading screen while fonts are loading
-  if (isLoading || !fontsLoaded) {
+  // Show loading screen
+  if (isLoading) {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color={colors.primary.main} />

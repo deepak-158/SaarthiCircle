@@ -14,7 +14,6 @@ import {
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
-import * as Location from 'expo-location';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LargeButton } from '../../components/common';
 import { colors, typography, spacing, borderRadius, shadows } from '../../theme';
@@ -29,14 +28,12 @@ const SOSScreen = ({ navigation }) => {
   const [countdown, setCountdown] = useState(5);
   const [isSent, setIsSent] = useState(false);
   const [userProfile, setUserProfile] = useState(null);
-  const [location, setLocation] = useState(null);
   const [emergencyContacts, setEmergencyContacts] = useState([]);
   
   const pulseAnim = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
     loadUserData();
-    getLocation();
     
     // Continuous pulse animation
     Animated.loop(
@@ -78,28 +75,12 @@ const SOSScreen = ({ navigation }) => {
     }
   };
 
-  const getLocation = async () => {
-    try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status === 'granted') {
-        const loc = await Location.getCurrentPositionAsync({});
-        setLocation(loc.coords);
-      }
-    } catch (error) {
-      console.log('Location error:', error);
-    }
-  };
-
   const sendSOSAlert = async () => {
     try {
       // Create SOS alert in Firebase
       const alertData = {
         seniorName: userProfile?.fullName || userProfile?.name || 'Senior',
         seniorPhone: userProfile?.phone || 'Unknown',
-        location: location ? {
-          latitude: location.latitude,
-          longitude: location.longitude,
-        } : null,
         message: 'Emergency SOS triggered',
         timestamp: new Date().toISOString(),
       };
