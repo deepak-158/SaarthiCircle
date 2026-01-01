@@ -7,7 +7,7 @@
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "scheme": "saathicircle",
-    "newArchEnabled": true,
+    "newArchEnabled": false,
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
@@ -37,15 +37,7 @@
     },
     "plugins": [
       "expo-asset",
-      "expo-font",
-      [
-        "expo-splash-screen",
-        {
-          "backgroundColor": "#5B9BD5",
-          "image": "./assets/splash-icon.png",
-          "imageWidth": 200
-        }
-      ]
+      "expo-font"
     ],
     "extra": {
       "eas": {

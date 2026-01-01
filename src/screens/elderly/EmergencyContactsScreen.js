@@ -1,5 +1,5 @@
 // Emergency Contacts Screen
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -9,16 +9,16 @@ import {
   TouchableOpacity,
   Alert,
   Modal,
+  Linking,
+  Platform,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { colors, typography, spacing } from '../../theme';
 import { AccessibleInput, LargeButton } from '../../components/common';
 
 const EmergencyContactsScreen = ({ navigation }) => {
-  const [contacts, setContacts] = useState([
-    { id: '1', name: 'Son', phone: '+91 98765 43210', relationship: 'Son', isPrimary: true },
-    { id: '2', name: 'Daughter', phone: '+91 87654 32109', relationship: 'Daughter', isPrimary: false },
-  ]);
+  const [contacts, setContacts] = useState([]);
   const [showModal, setShowModal] = useState(false);
   const [newContact, setNewContact] = useState({
     name: '',
@@ -26,19 +26,53 @@ const EmergencyContactsScreen = ({ navigation }) => {
     relationship: '',
   });
 
-  const handleAddContact = () => {
+  useEffect(() => {
+    loadContacts();
+  }, []);
+
+  const loadContacts = async () => {
+    try {
+      const contactsJson = await AsyncStorage.getItem('emergencyContacts');
+      if (contactsJson) {
+        setContacts(JSON.parse(contactsJson));
+      } else {
+        // Set default contacts
+        const defaultContacts = [
+          { id: '1', name: 'Emergency Services', phone: '112', relationship: 'Emergency', isPrimary: true },
+        ];
+        setContacts(defaultContacts);
+        await AsyncStorage.setItem('emergencyContacts', JSON.stringify(defaultContacts));
+      }
+    } catch (error) {
+      console.error('Error loading contacts:', error);
+    }
+  };
+
+  const saveContacts = async (updatedContacts) => {
+    try {
+      await AsyncStorage.setItem('emergencyContacts', JSON.stringify(updatedContacts));
+      setContacts(updatedContacts);
+    } catch (error) {
+      console.error('Error saving contacts:', error);
+    }
+  };
+
+  const handleAddContact = async () => {
     if (!newContact.name || !newContact.phone) {
       Alert.alert('Error', 'Please fill in name and phone number');
       return;
     }
-    setContacts([
+    
+    const updatedContacts = [
       ...contacts,
       {
         id: Date.now().toString(),
         ...newContact,
         isPrimary: contacts.length === 0,
       },
-    ]);
+    ];
+    
+    await saveContacts(updatedContacts);
     setNewContact({ name: '', phone: '', relationship: '' });
     setShowModal(false);
     Alert.alert('Success', 'Emergency contact added!');
@@ -53,21 +87,37 @@ const EmergencyContactsScreen = ({ navigation }) => {
         {
           text: 'Delete',
           style: 'destructive',
-          onPress: () => setContacts(contacts.filter(c => c.id !== id)),
+          onPress: async () => {
+            const updatedContacts = contacts.filter(c => c.id !== id);
+            await saveContacts(updatedContacts);
+          },
         },
       ]
     );
   };
 
-  const handleSetPrimary = (id) => {
-    setContacts(contacts.map(c => ({
+  const handleSetPrimary = async (id) => {
+    const updatedContacts = contacts.map(c => ({
       ...c,
       isPrimary: c.id === id,
-    })));
+    }));
+    await saveContacts(updatedContacts);
   };
 
-  const handleCallContact = (phone) => {
-    Alert.alert('Calling', `Calling ${phone}...`);
+  const handleCallContact = async (phone) => {
+    const cleanPhone = phone.replace(/\s/g, '');
+    const url = Platform.OS === 'ios' ? `telprompt:${cleanPhone}` : `tel:${cleanPhone}`;
+    
+    try {
+      const canOpen = await Linking.canOpenURL(url);
+      if (canOpen) {
+        await Linking.openURL(url);
+      } else {
+        Alert.alert('Cannot make call', `Please dial ${phone} manually`);
+      }
+    } catch (error) {
+      Alert.alert('Call Failed', `Please dial ${phone} manually`);
+    }
   };
 
   return (

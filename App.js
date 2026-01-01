@@ -1,12 +1,11 @@
 // SaathiCircle - AI-Powered Companionship & Help Platform for Seniors
 // Main App Entry Point
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import { StatusBar, LogBox, View, Text, ActivityIndicator, StyleSheet } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as SplashScreen from 'expo-splash-screen';
 import * as Font from 'expo-font';
 import { MaterialCommunityIcons, Ionicons, FontAwesome5 } from '@expo/vector-icons';
 
@@ -21,9 +20,6 @@ import {
 // Config - Updated to use Firebase
 import { USER_ROLES, subscribeToAuthState, getUserProfile } from './src/config/firebase';
 import { colors } from './src/theme';
-
-// Keep the splash screen visible while we fetch resources
-SplashScreen.preventAutoHideAsync();
 
 // Ignore specific warnings
 LogBox.ignoreLogs([
@@ -116,12 +112,6 @@ const App = () => {
     }
   };
 
-  const onLayoutRootView = useCallback(async () => {
-    if (!isLoading && fontsLoaded) {
-      await SplashScreen.hideAsync();
-    }
-  }, [isLoading, fontsLoaded]);
-
   // Show loading screen while fonts are loading
   if (isLoading || !fontsLoaded) {
     return (
@@ -133,7 +123,7 @@ const App = () => {
   }
 
   return (
-    <View style={{ flex: 1 }} onLayout={onLayoutRootView}>
+    <View style={{ flex: 1 }}>
       <StatusBar 
         barStyle="dark-content" 
         backgroundColor={colors.neutral.white}

@@ -9,12 +9,17 @@ import {
   Animated,
   Alert,
   Vibration,
+  Linking,
+  Platform,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
+import * as Location from 'expo-location';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LargeButton } from '../../components/common';
 import { colors, typography, spacing, borderRadius, shadows } from '../../theme';
 import { getTranslation } from '../../i18n/translations';
+import { createSOSAlert } from '../../config/firebase';
 
 const SOSScreen = ({ navigation }) => {
   const [language] = useState('en');
@@ -23,11 +28,16 @@ const SOSScreen = ({ navigation }) => {
   const [isActivated, setIsActivated] = useState(false);
   const [countdown, setCountdown] = useState(5);
   const [isSent, setIsSent] = useState(false);
+  const [userProfile, setUserProfile] = useState(null);
+  const [location, setLocation] = useState(null);
+  const [emergencyContacts, setEmergencyContacts] = useState([]);
   
   const pulseAnim = useRef(new Animated.Value(1)).current;
-  const shakeAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
+    loadUserData();
+    getLocation();
+    
     // Continuous pulse animation
     Animated.loop(
       Animated.sequence([
@@ -45,6 +55,84 @@ const SOSScreen = ({ navigation }) => {
     ).start();
   }, []);
 
+  const loadUserData = async () => {
+    try {
+      const profileJson = await AsyncStorage.getItem('userProfile');
+      if (profileJson) {
+        const profile = JSON.parse(profileJson);
+        setUserProfile(profile);
+        
+        // Load emergency contacts
+        const contactsJson = await AsyncStorage.getItem('emergencyContacts');
+        if (contactsJson) {
+          setEmergencyContacts(JSON.parse(contactsJson));
+        } else {
+          // Default emergency contact
+          setEmergencyContacts([
+            { name: 'Emergency Services', phone: '112', relationship: 'Emergency' }
+          ]);
+        }
+      }
+    } catch (error) {
+      console.error('Error loading user data:', error);
+    }
+  };
+
+  const getLocation = async () => {
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status === 'granted') {
+        const loc = await Location.getCurrentPositionAsync({});
+        setLocation(loc.coords);
+      }
+    } catch (error) {
+      console.log('Location error:', error);
+    }
+  };
+
+  const sendSOSAlert = async () => {
+    try {
+      // Create SOS alert in Firebase
+      const alertData = {
+        seniorName: userProfile?.fullName || userProfile?.name || 'Senior',
+        seniorPhone: userProfile?.phone || 'Unknown',
+        location: location ? {
+          latitude: location.latitude,
+          longitude: location.longitude,
+        } : null,
+        message: 'Emergency SOS triggered',
+        timestamp: new Date().toISOString(),
+      };
+      
+      await createSOSAlert(userProfile?.phone || 'unknown', alertData);
+      console.log('SOS Alert sent to Firebase');
+    } catch (error) {
+      console.error('Error sending SOS to Firebase:', error);
+    }
+  };
+
+  const callEmergencyContact = async () => {
+    // Try to call first emergency contact or 112
+    const primaryContact = emergencyContacts.find(c => c.isPrimary) || emergencyContacts[0];
+    const phoneNumber = primaryContact?.phone || '112';
+    
+    try {
+      const url = Platform.OS === 'ios' 
+        ? `telprompt:${phoneNumber}` 
+        : `tel:${phoneNumber}`;
+      
+      const canOpen = await Linking.canOpenURL(url);
+      if (canOpen) {
+        await Linking.openURL(url);
+      } else {
+        Alert.alert('Cannot make call', `Please dial ${phoneNumber} manually`);
+      }
+    } catch (error) {
+      console.error('Error making call:', error);
+      Alert.alert('Call Failed', `Please dial ${phoneNumber} manually`);
+    }
+  };
+
   useEffect(() => {
     if (isActivated && countdown > 0) {
       const timer = setInterval(() => {
@@ -58,7 +146,25 @@ const SOSScreen = ({ navigation }) => {
       // Send SOS
       setIsSent(true);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-      // In production: Send SOS to emergency contacts and backend
+      
+      // Actually send the SOS alert
+      sendSOSAlert();
+      
+      // Try to call emergency contact
+      setTimeout(() => {
+        Alert.alert(
+          '📞 Call Emergency Contact?',
+          'Would you like to call your emergency contact now?',
+          [
+            { text: 'No', style: 'cancel' },
+            { 
+              text: 'Yes, Call Now', 
+              onPress: callEmergencyContact,
+              style: 'default',
+            },
+          ]
+        );
+      }, 1000);
     }
   }, [isActivated, countdown]);
 
@@ -111,19 +217,48 @@ const SOSScreen = ({ navigation }) => {
             </Text>
 
             <View style={styles.contactsCard}>
-              <Text style={styles.contactsTitle}>Notified:</Text>
-              <View style={styles.contactItem}>
-                <MaterialCommunityIcons name="account" size={24} color={colors.neutral.white} />
-                <Text style={styles.contactText}>Emergency Contact</Text>
-              </View>
-              <View style={styles.contactItem}>
-                <MaterialCommunityIcons name="hospital-building" size={24} color={colors.neutral.white} />
-                <Text style={styles.contactText}>Local Emergency Services</Text>
-              </View>
-              <View style={styles.contactItem}>
-                <MaterialCommunityIcons name="account-group" size={24} color={colors.neutral.white} />
-                <Text style={styles.contactText}>NGO Support Team</Text>
-              </View>
+              <Text style={styles.contactsTitle}>Quick Call:</Text>
+              
+              {/* Emergency Services */}
+              <TouchableOpacity 
+                style={styles.contactItem}
+                onPress={() => Linking.openURL('tel:112')}
+              >
+                <MaterialCommunityIcons name="phone-alert" size={24} color={colors.neutral.white} />
+                <Text style={styles.contactText}>Emergency - 112</Text>
+                <MaterialCommunityIcons name="phone" size={20} color={colors.accent.yellow} />
+              </TouchableOpacity>
+
+              <TouchableOpacity 
+                style={styles.contactItem}
+                onPress={() => Linking.openURL('tel:108')}
+              >
+                <MaterialCommunityIcons name="ambulance" size={24} color={colors.neutral.white} />
+                <Text style={styles.contactText}>Ambulance - 108</Text>
+                <MaterialCommunityIcons name="phone" size={20} color={colors.accent.yellow} />
+              </TouchableOpacity>
+
+              <TouchableOpacity 
+                style={styles.contactItem}
+                onPress={() => Linking.openURL('tel:100')}
+              >
+                <MaterialCommunityIcons name="police-badge" size={24} color={colors.neutral.white} />
+                <Text style={styles.contactText}>Police - 100</Text>
+                <MaterialCommunityIcons name="phone" size={20} color={colors.accent.yellow} />
+              </TouchableOpacity>
+
+              {emergencyContacts.length > 0 && emergencyContacts[0].phone && (
+                <TouchableOpacity 
+                  style={styles.contactItem}
+                  onPress={() => Linking.openURL(`tel:${emergencyContacts[0].phone}`)}
+                >
+                  <MaterialCommunityIcons name="account-heart" size={24} color={colors.neutral.white} />
+                  <Text style={styles.contactText}>
+                    {emergencyContacts[0].name || 'Emergency Contact'}
+                  </Text>
+                  <MaterialCommunityIcons name="phone" size={20} color={colors.accent.yellow} />
+                </TouchableOpacity>
+              )}
             </View>
 
             <Text style={styles.stayCalm}>
@@ -241,18 +376,27 @@ const SOSScreen = ({ navigation }) => {
         <View style={styles.emergencyNumbers}>
           <Text style={styles.emergencyTitle}>Emergency Numbers:</Text>
           <View style={styles.numberRow}>
-            <View style={styles.numberItem}>
+            <TouchableOpacity 
+              style={styles.numberItem}
+              onPress={() => Linking.openURL('tel:100')}
+            >
               <Text style={styles.numberLabel}>Police</Text>
               <Text style={styles.number}>100</Text>
-            </View>
-            <View style={styles.numberItem}>
+            </TouchableOpacity>
+            <TouchableOpacity 
+              style={styles.numberItem}
+              onPress={() => Linking.openURL('tel:108')}
+            >
               <Text style={styles.numberLabel}>Ambulance</Text>
               <Text style={styles.number}>108</Text>
-            </View>
-            <View style={styles.numberItem}>
-              <Text style={styles.numberLabel}>Women</Text>
-              <Text style={styles.number}>1091</Text>
-            </View>
+            </TouchableOpacity>
+            <TouchableOpacity 
+              style={styles.numberItem}
+              onPress={() => Linking.openURL('tel:112')}
+            >
+              <Text style={styles.numberLabel}>Emergency</Text>
+              <Text style={styles.number}>112</Text>
+            </TouchableOpacity>
           </View>
         </View>
       </SafeAreaView>
@@ -272,13 +416,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    padding: spacing.lg,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
   },
   backButton: {
-    width: 48,
-    height: 48,
-    justifyContent: 'center',
-    alignItems: 'center',
+    padding: spacing.sm,
   },
   headerTitle: {
     fontSize: typography.sizes.xl,
@@ -289,7 +431,7 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    padding: spacing.lg,
+    paddingHorizontal: spacing.lg,
   },
   sosButtonOuter: {
     marginBottom: spacing.xl,
@@ -298,17 +440,17 @@ const styles = StyleSheet.create({
     width: 200,
     height: 200,
     borderRadius: 100,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    justifyContent: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.3)',
     alignItems: 'center',
-    borderWidth: 6,
+    justifyContent: 'center',
+    borderWidth: 4,
     borderColor: colors.neutral.white,
   },
   sosButtonActivated: {
-    backgroundColor: 'rgba(255,255,255,0.4)',
+    backgroundColor: 'rgba(0, 0, 0, 0.3)',
   },
   sosText: {
-    fontSize: typography.sizes.xxxl,
+    fontSize: typography.sizes.xxl,
     fontWeight: typography.weights.bold,
     color: colors.neutral.white,
     marginTop: spacing.sm,
@@ -319,8 +461,7 @@ const styles = StyleSheet.create({
     color: colors.neutral.white,
   },
   statusText: {
-    fontSize: typography.sizes.xl,
-    fontWeight: typography.weights.medium,
+    fontSize: typography.sizes.lg,
     color: colors.neutral.white,
     textAlign: 'center',
     marginBottom: spacing.lg,
@@ -328,47 +469,48 @@ const styles = StyleSheet.create({
   voiceHint: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.lg,
-    borderRadius: borderRadius.full,
-    marginBottom: spacing.lg,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: borderRadius.lg,
+    marginBottom: spacing.md,
   },
   voiceHintText: {
-    fontSize: typography.sizes.lg,
+    fontSize: typography.sizes.md,
     color: colors.neutral.white,
     marginLeft: spacing.sm,
   },
   infoCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.2)',
-    padding: spacing.md,
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
     borderRadius: borderRadius.md,
     marginBottom: spacing.lg,
   },
   infoText: {
-    fontSize: typography.sizes.md,
+    fontSize: typography.sizes.sm,
     color: colors.neutral.white,
     marginLeft: spacing.sm,
     flex: 1,
   },
   cancelButton: {
     borderColor: colors.neutral.white,
-    width: '80%',
+    backgroundColor: 'transparent',
+    marginTop: spacing.md,
   },
   emergencyNumbers: {
-    backgroundColor: 'rgba(0,0,0,0.2)',
-    padding: spacing.lg,
-    marginHorizontal: spacing.lg,
-    marginBottom: spacing.lg,
-    borderRadius: borderRadius.lg,
+    backgroundColor: 'rgba(0, 0, 0, 0.2)',
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.lg,
   },
   emergencyTitle: {
     fontSize: typography.sizes.md,
+    fontWeight: typography.weights.semiBold,
     color: colors.neutral.white,
-    marginBottom: spacing.md,
-    opacity: 0.8,
+    textAlign: 'center',
+    marginBottom: spacing.sm,
   },
   numberRow: {
     flexDirection: 'row',
@@ -376,6 +518,7 @@ const styles = StyleSheet.create({
   },
   numberItem: {
     alignItems: 'center',
+    padding: spacing.sm,
   },
   numberLabel: {
     fontSize: typography.sizes.sm,
@@ -386,9 +529,8 @@ const styles = StyleSheet.create({
     fontSize: typography.sizes.xl,
     fontWeight: typography.weights.bold,
     color: colors.neutral.white,
-    marginTop: spacing.xs,
   },
-  // Sent state styles
+  // Sent Screen Styles
   sentContainer: {
     flex: 1,
     backgroundColor: colors.secondary.green,
@@ -397,7 +539,7 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    padding: spacing.lg,
+    paddingHorizontal: spacing.lg,
   },
   sentIconContainer: {
     marginBottom: spacing.lg,
@@ -406,49 +548,50 @@ const styles = StyleSheet.create({
     fontSize: typography.sizes.xxxl,
     fontWeight: typography.weights.bold,
     color: colors.neutral.white,
-    textAlign: 'center',
+    marginBottom: spacing.sm,
   },
   sentSubtitle: {
-    fontSize: typography.sizes.xl,
+    fontSize: typography.sizes.lg,
     color: colors.neutral.white,
     textAlign: 'center',
-    marginTop: spacing.md,
+    marginBottom: spacing.xl,
     opacity: 0.9,
   },
   contactsCard: {
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    padding: spacing.lg,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
     borderRadius: borderRadius.lg,
-    marginTop: spacing.xl,
+    padding: spacing.md,
     width: '100%',
+    marginBottom: spacing.lg,
   },
   contactsTitle: {
-    fontSize: typography.sizes.md,
+    fontSize: typography.sizes.lg,
+    fontWeight: typography.weights.bold,
     color: colors.neutral.white,
-    opacity: 0.8,
     marginBottom: spacing.md,
   },
   contactItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: spacing.md,
+    paddingVertical: spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.2)',
   },
   contactText: {
-    fontSize: typography.sizes.lg,
+    fontSize: typography.sizes.md,
     color: colors.neutral.white,
     marginLeft: spacing.md,
+    flex: 1,
   },
   stayCalm: {
-    fontSize: typography.sizes.xl,
+    fontSize: typography.sizes.lg,
     color: colors.neutral.white,
     textAlign: 'center',
-    marginTop: spacing.xl,
-    fontWeight: typography.weights.medium,
+    marginBottom: spacing.xl,
   },
   homeButton: {
     borderColor: colors.neutral.white,
-    marginTop: spacing.xxl,
-    width: '80%',
+    backgroundColor: 'transparent',
   },
 });
 
