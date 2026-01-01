@@ -1,11 +1,14 @@
 // SaathiCircle - AI-Powered Companionship & Help Platform for Seniors
 // Main App Entry Point
 
-import React, { useState, useEffect } from 'react';
-import { StatusBar, LogBox } from 'react-native';
+import React, { useState, useEffect, useCallback } from 'react';
+import { StatusBar, LogBox, View, Text, ActivityIndicator, StyleSheet } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SplashScreen from 'expo-splash-screen';
+import * as Font from 'expo-font';
+import { MaterialCommunityIcons, Ionicons, FontAwesome5 } from '@expo/vector-icons';
 
 // Navigators
 import {
@@ -19,6 +22,9 @@ import {
 import { USER_ROLES, subscribeToAuthState, getUserProfile } from './src/config/firebase';
 import { colors } from './src/theme';
 
+// Keep the splash screen visible while we fetch resources
+SplashScreen.preventAutoHideAsync();
+
 // Ignore specific warnings
 LogBox.ignoreLogs([
   'Non-serializable values were found in the navigation state',
@@ -27,13 +33,38 @@ LogBox.ignoreLogs([
 
 const RootStack = createNativeStackNavigator();
 
+// Function to load all required fonts including icons
+const loadFonts = async () => {
+  await Font.loadAsync({
+    ...MaterialCommunityIcons.font,
+    ...Ionicons.font,
+    ...FontAwesome5.font,
+  });
+};
+
 const App = () => {
   const [isLoading, setIsLoading] = useState(true);
+  const [fontsLoaded, setFontsLoaded] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [userRole, setUserRole] = useState(null);
 
   useEffect(() => {
-    checkAuthStatus();
+    async function prepare() {
+      try {
+        // Load fonts
+        await loadFonts();
+        setFontsLoaded(true);
+        
+        // Check auth status
+        await checkAuthStatus();
+      } catch (e) {
+        console.warn('Error loading resources:', e);
+      } finally {
+        setIsLoading(false);
+      }
+    }
+
+    prepare();
     
     // Subscribe to Firebase auth state changes
     const unsubscribe = subscribeToAuthState(async (user) => {
@@ -85,12 +116,24 @@ const App = () => {
     }
   };
 
-  if (isLoading) {
-    return null; // Or a loading screen
+  const onLayoutRootView = useCallback(async () => {
+    if (!isLoading && fontsLoaded) {
+      await SplashScreen.hideAsync();
+    }
+  }, [isLoading, fontsLoaded]);
+
+  // Show loading screen while fonts are loading
+  if (isLoading || !fontsLoaded) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color={colors.primary.main} />
+        <Text style={styles.loadingText}>Loading SaathiCircle...</Text>
+      </View>
+    );
   }
 
   return (
-    <>
+    <View style={{ flex: 1 }} onLayout={onLayoutRootView}>
       <StatusBar 
         barStyle="dark-content" 
         backgroundColor={colors.neutral.white}
@@ -124,8 +167,23 @@ const App = () => {
           />
         </RootStack.Navigator>
       </NavigationContainer>
-    </>
+    </View>
   );
 };
+
+const styles = StyleSheet.create({
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: colors.neutral.white,
+  },
+  loadingText: {
+    marginTop: 16,
+    fontSize: 18,
+    color: colors.primary.main,
+    fontWeight: '500',
+  },
+});
 
 export default App;
