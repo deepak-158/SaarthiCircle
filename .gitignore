@@ -15,6 +15,7 @@ web-build/
 *.key
 *.mobileprovision
 *.orig.*
+.expo-shared/
 
 # Metro
 .metro-health-check*
@@ -30,15 +31,19 @@ ios/
 .env.development.local
 .env.test.local
 .env.production.local
+.env.production
 
 # macOS
 .DS_Store
 *.pem
+.AppleDouble
+.LSOverride
 
 # Windows
 Thumbs.db
 ehthumbs.db
 Desktop.ini
+$RECYCLE.BIN/
 
 # VS Code
 .vscode/
@@ -47,6 +52,8 @@ Desktop.ini
 # IDE
 .idea/
 *.iml
+*.sublime-workspace
+*.sublime-project
 
 # Debug
 npm-debug.log
@@ -56,6 +63,8 @@ yarn-error.log
 # Testing
 coverage/
 .nyc_output/
+__tests__/
+*.test.js
 
 # Build outputs
 build/
@@ -76,13 +85,22 @@ build/
 # Firebase
 google-services.json
 GoogleService-Info.plist
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
 
 # Misc
 *.bak
 *.cache
+*.orig
 
 # Bundle analyzer
 stats.json
 
 # Error files
 com.facebook.react.devsupport.BundleDownloader$2
+
+# Secrets - Never commit these
+secrets/
+*.secret
+credentials.json
