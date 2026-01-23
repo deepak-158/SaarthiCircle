@@ -1,5 +1,5 @@
 // Personal Information Screen
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -8,10 +8,13 @@ import {
   ScrollView,
   TouchableOpacity,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { colors, typography, spacing } from '../../theme';
 import { AccessibleInput, LargeButton } from '../../components/common';
+import { BACKEND_URL as API_BASE } from '../../config/backend';
 
 const PersonalInfoScreen = ({ navigation }) => {
   const [formData, setFormData] = useState({
@@ -24,10 +27,70 @@ const PersonalInfoScreen = ({ navigation }) => {
     pincode: '',
   });
   const [isEditing, setIsEditing] = useState(false);
+  const [loading, setLoading] = useState(false);
 
-  const handleSave = () => {
-    Alert.alert('Saved!', 'Your personal information has been updated.');
-    setIsEditing(false);
+  useEffect(() => {
+    loadProfile();
+  }, []);
+
+  const loadProfile = async () => {
+    try {
+      setLoading(true);
+      const profileJson = await AsyncStorage.getItem('userProfile');
+      if (profileJson) {
+        const profile = JSON.parse(profileJson);
+        setFormData({
+          fullName: profile.name || profile.full_name || '',
+          phone: profile.phone || '',
+          email: profile.email || '',
+          dateOfBirth: profile.date_of_birth || '',
+          address: profile.address || '',
+          city: profile.city || '',
+          pincode: profile.pincode || '',
+        });
+      }
+    } catch (error) {
+      console.error('Error loading profile:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSave = async () => {
+    setLoading(true);
+    try {
+      const token = await AsyncStorage.getItem('userToken');
+      const resp = await fetch(`${API_BASE}/profile`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          full_name: formData.fullName,
+          phone: formData.phone,
+          date_of_birth: formData.dateOfBirth,
+          address: formData.address,
+          city: formData.city,
+          pincode: formData.pincode,
+        }),
+      });
+
+      const result = await resp.json();
+      if (!resp.ok) throw new Error(result?.error || 'Failed to update profile');
+
+      // Update local storage
+      const updatedProfile = { ...result.profile };
+      await AsyncStorage.setItem('userProfile', JSON.stringify(updatedProfile));
+      
+      Alert.alert('Saved!', 'Your personal information has been updated.');
+      setIsEditing(false);
+    } catch (error) {
+      console.error('Error saving profile:', error);
+      Alert.alert('Error', error.message || 'Failed to save profile');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const updateField = (field, value) => {
@@ -84,6 +147,10 @@ const PersonalInfoScreen = ({ navigation }) => {
             )}
           </View>
         </View>
+
+        {loading && !isEditing && (
+          <ActivityIndicator size="large" color={colors.primary.main} style={{ marginTop: 20 }} />
+        )}
 
         {/* Form Fields */}
         <View style={styles.formSection}>

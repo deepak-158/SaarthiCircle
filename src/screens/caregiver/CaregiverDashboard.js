@@ -15,12 +15,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { colors, typography, spacing, borderRadius, shadows } from '../../theme';
-import { 
-  getAllHelpRequests, 
-  updateHelpRequestStatus, 
-  getVolunteerStats,
-  getUserProfile,
-} from '../../config/firebase';
+// Firebase imports removed - feature being migrated to centralized backend
 
 // Dummy/fallback requests data
 const DUMMY_REQUESTS = [
@@ -98,13 +93,14 @@ const DUMMY_REQUESTS = [
   },
 ];
 
+import { BACKEND_URL as API_BASE } from '../../config/backend';
+
 const CaregiverDashboard = ({ navigation }) => {
   const [allRequests, setAllRequests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState('pending');
   const [volunteerProfile, setVolunteerProfile] = useState(null);
-  const [stats, setStats] = useState({ totalHelped: 0, activeRequests: 0 });
 
   useEffect(() => {
     loadDashboardData();
@@ -113,11 +109,31 @@ const CaregiverDashboard = ({ navigation }) => {
   const loadDashboardData = async () => {
     try {
       setLoading(true);
+      const token = await AsyncStorage.getItem('userToken');
       
-      // Load volunteer profile
-      await loadVolunteerProfile();
+      // Load fresh profile from backend
+      try {
+        const resp = await fetch(`${API_BASE}/me`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (resp.ok) {
+          const data = await resp.json();
+          if (data.user) {
+            setVolunteerProfile(data.user);
+            await AsyncStorage.setItem('userProfile', JSON.stringify(data.user));
+          }
+        } else {
+          // fallback to local
+          const profileJson = await AsyncStorage.getItem('userProfile');
+          if (profileJson) setVolunteerProfile(JSON.parse(profileJson));
+        }
+      } catch (e) {
+        console.warn('Dashboard: Failed to fetch profile:', e);
+        const profileJson = await AsyncStorage.getItem('userProfile');
+        if (profileJson) setVolunteerProfile(JSON.parse(profileJson));
+      }
       
-      // Load help requests from Firebase
+      // Load help requests (can be expanded to backend later)
       await loadHelpRequests();
       
     } catch (error) {
@@ -127,55 +143,38 @@ const CaregiverDashboard = ({ navigation }) => {
     }
   };
 
-  const loadVolunteerProfile = async () => {
-    try {
-      const profileJson = await AsyncStorage.getItem('userProfile');
-      if (profileJson) {
-        const profile = JSON.parse(profileJson);
-        setVolunteerProfile(profile);
-        
-        // Try to get stats from Firebase
-        if (profile.id || profile.uid) {
-          try {
-            const volunteerStats = await getVolunteerStats(profile.id || profile.uid);
-            setStats(volunteerStats);
-          } catch (err) {
-            console.log('Could not load volunteer stats:', err);
-          }
-        }
-      }
-    } catch (error) {
-      console.error('Error loading profile:', error);
-    }
-  };
-
   const loadHelpRequests = async () => {
     try {
-      // Try to load from Firebase
-      const firebaseRequests = await getAllHelpRequests();
+      const token = await AsyncStorage.getItem('userToken');
+      // Fetch pending requests
+      const resp = await fetch(`${API_BASE}/help-requests`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
       
-      if (firebaseRequests && firebaseRequests.length > 0) {
-        // Format Firebase requests
-        const formattedRequests = firebaseRequests.map(req => ({
-          id: req.id,
-          seniorName: req.seniorName || 'Senior',
-          helpType: req.helpType || req.category || 'General Help',
-          priority: req.priority || 'medium',
-          status: req.status || 'pending',
-          description: req.description || req.message || 'Help needed',
-          time: formatTimeAgo(req.createdAt),
-          icon: getIconForHelpType(req.helpType || req.category),
-          completedAt: req.completedAt ? formatTimeAgo(req.completedAt) : null,
-          ...req,
-        }));
-        
-        setAllRequests(formattedRequests);
-      } else {
-        // Use dummy data if no Firebase data
+      if (!resp.ok) throw new Error('Failed to fetch requests');
+      
+      const data = await resp.json();
+      const realRequests = (data.requests || []).map(r => ({
+        id: r.id,
+        seniorName: r.senior?.name || 'Anonymous Senior',
+        helpType: r.category,
+        priority: r.priority,
+        status: r.status,
+        description: r.description,
+        time: formatTimeAgo(r.created_at),
+        icon: getIconForHelpType(r.category),
+        senior: r.senior,
+        raw: r // keep raw data for detail view
+      }));
+
+      // Combine with dummy only if empty for demo purposes
+      if (realRequests.length === 0) {
         setAllRequests(DUMMY_REQUESTS);
+      } else {
+        setAllRequests(realRequests);
       }
     } catch (error) {
-      console.log('Using dummy requests:', error.message);
+      console.error('Error loading requests:', error);
       setAllRequests(DUMMY_REQUESTS);
     }
   };
@@ -236,15 +235,19 @@ const CaregiverDashboard = ({ navigation }) => {
 
   const handleAccept = async (requestId) => {
     try {
-      // Update in Firebase if not dummy
+      const token = await AsyncStorage.getItem('userToken');
+      
       if (!requestId.toString().startsWith('dummy')) {
-        const volunteerUid = volunteerProfile?.id || volunteerProfile?.uid;
-        await updateHelpRequestStatus(requestId, 'active', volunteerUid);
+        const resp = await fetch(`${API_BASE}/help-requests/${requestId}/accept`, {
+          method: 'PUT',
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (!resp.ok) throw new Error('Failed to accept request');
       }
       
       // Update local state
       setAllRequests(prev => 
-        prev.map(r => r.id === requestId ? { ...r, status: 'active' } : r)
+        prev.map(r => r.id === requestId ? { ...r, status: 'accepted' } : r)
       );
       
       const request = allRequests.find(r => r.id === requestId);
@@ -274,9 +277,14 @@ const CaregiverDashboard = ({ navigation }) => {
 
   const handleComplete = async (requestId) => {
     try {
-      // Update in Firebase if not dummy
+      const token = await AsyncStorage.getItem('userToken');
+      
       if (!requestId.toString().startsWith('dummy')) {
-        await updateHelpRequestStatus(requestId, 'completed');
+        const resp = await fetch(`${API_BASE}/help-requests/${requestId}/complete`, {
+          method: 'PUT',
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (!resp.ok) throw new Error('Failed to complete request');
       }
       
       // Update local state
@@ -339,7 +347,7 @@ const CaregiverDashboard = ({ navigation }) => {
           <View>
             <Text style={styles.headerGreeting}>Welcome Back</Text>
             <Text style={styles.headerTitle}>
-              {volunteerProfile?.fullName || 'Volunteer'}
+              {volunteerProfile?.full_name || volunteerProfile?.fullName || 'Volunteer'}
             </Text>
           </View>
           <TouchableOpacity 
@@ -372,6 +380,16 @@ const CaregiverDashboard = ({ navigation }) => {
           </View>
         </View>
       </LinearGradient>
+
+      {/* Pending Approval Banner */}
+      {volunteerProfile?.is_approved === false && (
+        <View style={styles.pendingBanner}>
+          <MaterialCommunityIcons name="clock-alert-outline" size={20} color={colors.neutral.white} />
+          <Text style={styles.pendingBannerText}>
+            Application Pending Approval. Our team is reviewing your profile.
+          </Text>
+        </View>
+      )}
 
       {/* Tabs */}
       <View style={styles.tabsContainer}>
@@ -817,6 +835,24 @@ const styles = StyleSheet.create({
     fontSize: typography.sizes.md,
     fontWeight: typography.weights.semiBold,
     color: colors.neutral.white,
+    marginLeft: spacing.sm,
+  },
+  pendingBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.accent.orange,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    marginHorizontal: spacing.md,
+    marginTop: spacing.md,
+    borderRadius: borderRadius.md,
+    ...shadows.sm,
+  },
+  pendingBannerText: {
+    flex: 1,
+    fontSize: typography.sizes.sm,
+    color: colors.neutral.white,
+    fontWeight: typography.weights.medium,
     marginLeft: spacing.sm,
   },
 });

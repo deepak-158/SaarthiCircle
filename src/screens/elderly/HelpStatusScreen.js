@@ -13,13 +13,16 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { LargeButton } from '../../components/common';
 import { colors, typography, spacing, borderRadius, shadows } from '../../theme';
 import { getTranslation } from '../../i18n/translations';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { BACKEND_URL } from '../../config/backend';
 
 const HelpStatusScreen = ({ navigation, route }) => {
-  const { category } = route.params || {};
+  const { category, requestId } = route.params || {};
   const [language] = useState('en');
   const t = getTranslation(language);
   
   const [status, setStatus] = useState('sent'); // sent, accepted, arriving
+  const [helper, setHelper] = useState(null);
   const pulseAnim = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
@@ -39,15 +42,56 @@ const HelpStatusScreen = ({ navigation, route }) => {
       ])
     ).start();
 
-    // Simulate status updates
-    const timer1 = setTimeout(() => setStatus('accepted'), 3000);
-    const timer2 = setTimeout(() => setStatus('arriving'), 6000);
+    let pollInterval;
+
+    if (requestId) {
+      const pollStatus = async () => {
+        try {
+          const token = await AsyncStorage.getItem('userToken');
+          const response = await fetch(`${BACKEND_URL}/help-requests`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          if (response.ok) {
+            const data = await response.json();
+            const currentRequest = data.requests.find(r => r.id === requestId);
+            if (currentRequest) {
+              if (currentRequest.status === 'accepted' || currentRequest.status === 'completed') {
+                setStatus('accepted');
+                if (currentRequest.volunteer_id) {
+                  // We could fetch volunteer details here if needed
+                  setHelper({
+                    name: 'Volunteer Caregiver',
+                    org: 'Local NGO Support'
+                  });
+                }
+              }
+              if (currentRequest.status === 'completed') {
+                 // Maybe navigate home or show a rating screen
+              }
+            }
+          }
+        } catch (e) {
+          console.error('Polling error:', e);
+        }
+      };
+
+      pollStatus();
+      pollInterval = setInterval(pollStatus, 5000);
+    } else {
+      // Simulate status updates if no requestId (demo mode)
+      const timer1 = setTimeout(() => setStatus('accepted'), 3000);
+      const timer2 = setTimeout(() => setStatus('arriving'), 6000);
+      
+      return () => {
+        clearTimeout(timer1);
+        clearTimeout(timer2);
+      };
+    }
 
     return () => {
-      clearTimeout(timer1);
-      clearTimeout(timer2);
+      if (pollInterval) clearInterval(pollInterval);
     };
-  }, []);
+  }, [requestId]);
 
   const handleCallHelper = () => {
     // Initiate call to helper

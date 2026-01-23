@@ -18,8 +18,9 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LargeButton, LargeCard } from '../../components/common';
 import { colors, typography, spacing, borderRadius, shadows } from '../../theme';
 import { getTranslation } from '../../i18n/translations';
-import { db } from '../../config/firebase';
-import { collection, query, where, getDocs, limit } from 'firebase/firestore';
+// Firebase imports removed
+import socketService, { getSocket, identify, requestCompanion } from '../../services/socketService';
+import { BACKEND_URL as API_BASE } from '../../config/backend';
 
 // Available companions (dummy + will be combined with real data)
 const dummyCompanions = [
@@ -77,12 +78,51 @@ const CompanionMatchingScreen = ({ navigation }) => {
   const [companion, setCompanion] = useState(null);
   const [allCompanions, setAllCompanions] = useState([]);
   const [userProfile, setUserProfile] = useState(null);
+  const [conversationId, setConversationId] = useState(null);
   const pulseAnim = React.useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
     loadUserProfile();
     fetchCompanions();
   }, []);
+
+  // Initialize socket and request a real companion session
+  useEffect(() => {
+    const initSocket = async () => {
+      try {
+        const profileJson = await AsyncStorage.getItem('userProfile');
+        const profile = profileJson ? JSON.parse(profileJson) : null;
+        const userId = profile?.id || profile?.uid || profile?.userId;
+        const socket = getSocket();
+
+        socket.off('session:started');
+        socket.on('session:started', ({ conversationId: cid, seniorId, volunteerId }) => {
+          setConversationId(cid);
+          setCompanion((prev) => prev || { id: volunteerId, isReal: true });
+          setSearching(false);
+          navigation.navigate('Chat', { mode: 'text', companion: { id: volunteerId, isReal: true }, conversationId: cid });
+        });
+
+        socket.off('seeker:queued');
+        socket.on('seeker:queued', () => {
+          setSearching(true);
+        });
+
+        if (userId) {
+          identify({ userId, role: 'SENIOR' });
+          requestCompanion({ seniorId: userId });
+        }
+      } catch (e) {
+        console.error('Socket init error:', e);
+      }
+    };
+    initSocket();
+    return () => {
+      const socket = getSocket();
+      socket.off('session:started');
+      socket.off('seeker:queued');
+    };
+  }, [navigation]);
 
   useEffect(() => {
     // Pulse animation during search
@@ -117,24 +157,25 @@ const CompanionMatchingScreen = ({ navigation }) => {
 
   const fetchCompanions = async () => {
     try {
-      // Try to fetch real volunteers from Firebase
-      const volunteersRef = collection(db, 'users');
-      const q = query(
-        volunteersRef,
-        where('role', '==', 'VOLUNTEER'),
-        where('isApproved', '==', true),
-        where('isActive', '==', true),
-        limit(10)
-      );
+      const token = await AsyncStorage.getItem('userToken');
+      const response = await fetch(`${API_BASE}/volunteers/available`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      if (!response.ok) throw new Error('Failed to fetch real volunteers');
       
-      const snapshot = await getDocs(q);
-      const realCompanions = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data(),
-        language: doc.data().skills?.join(', ') || 'Hindi, English',
-        interests: doc.data().skills || ['General Help'],
+      const data = await response.json();
+      const realCompanions = (data.volunteers || []).map(v => ({
+        id: v.id,
+        fullName: v.name || v.full_name || 'Friendly Volunteer',
+        phone: v.phone || '',
+        language: Array.isArray(v.skills) ? v.skills.join(', ') : 'Hindi, English',
+        interests: v.skills || ['General Help'],
         availableTime: 'Available Now',
         isReal: true,
+        rating: v.rating || 4.5,
       }));
 
       // Combine real and dummy companions
@@ -203,7 +244,11 @@ const CompanionMatchingScreen = ({ navigation }) => {
   };
 
   const handleTextChat = () => {
-    navigation.navigate('Chat', { mode: 'text', companion });
+    if (conversationId && companion) {
+      navigation.navigate('Chat', { mode: 'text', companion, conversationId });
+    } else {
+      navigation.navigate('Chat', { mode: 'text', companion });
+    }
   };
 
   // Emergency SOS Handler

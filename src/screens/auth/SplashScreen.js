@@ -7,9 +7,11 @@ import {
   Animated, 
   Dimensions 
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { colors, typography, spacing } from '../../theme';
+import { checkAuth } from '../../services/authService';
 
 const { width, height } = Dimensions.get('window');
 
@@ -43,12 +45,39 @@ const SplashScreen = ({ navigation }) => {
       }).start();
     }, 500);
 
-    // Navigate to Login screen after 3 seconds
-    const timer = setTimeout(() => {
-      navigation.replace('Login');
-    }, 3000);
+    const checkAndNavigate = async () => {
+      try {
+        const { isAuthenticated, userRole } = await checkAuth();
+        const firstTime = await AsyncStorage.getItem('isFirstTime');
+        const isFirstTime = firstTime === null;
 
-    return () => clearTimeout(timer);
+        setTimeout(() => {
+          if (!isAuthenticated) {
+            navigation.replace('Auth', { 
+              screen: isFirstTime ? 'LanguageSelection' : 'Login' 
+            });
+          } else {
+            // Navigate based on role
+            if (userRole === 'admin') {
+              navigation.replace('AdminApp');
+            } else if (userRole === 'volunteer' || userRole === 'caregiver') {
+              navigation.replace('CaregiverApp');
+            } else if (userRole === 'elderly') {
+              navigation.replace('ElderlyApp');
+            } else if (userRole === 'volunteer_pending') {
+              navigation.replace('Auth', { screen: 'VolunteerPending' });
+            } else {
+              navigation.replace('Auth', { screen: 'Login' });
+            }
+          }
+        }, 2500);
+      } catch (error) {
+        console.error('Splash navigation error:', error);
+        navigation.replace('Auth', { screen: 'Login' });
+      }
+    };
+
+    checkAndNavigate();
   }, []);
 
   return (

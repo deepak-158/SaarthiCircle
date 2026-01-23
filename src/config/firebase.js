@@ -506,6 +506,22 @@ export const subscribeToAuthState = (callback) => {
 // Export instances
 export { auth, db };
 
+// Notification service
+export const createNotification = async (notificationData) => {
+  try {
+    const notification = {
+      ...notificationData,
+      createdAt: serverTimestamp(),
+      read: false,
+    };
+    const docRef = await addDoc(collection(db, 'notifications'), notification);
+    return { id: docRef.id, ...notification };
+  } catch (error) {
+    console.error('Create notification error:', error);
+    throw error;
+  }
+};
+
 // Help Requests
 export const createHelpRequest = async (seniorUid, requestData) => {
   try {

@@ -5,7 +5,8 @@ import {
   Text, 
   StyleSheet, 
   View,
-  ActivityIndicator 
+  ActivityIndicator,
+  Platform 
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
@@ -25,8 +26,14 @@ const LargeButton = ({
   textStyle,
 }) => {
   const handlePress = () => {
-    // Haptic feedback for better UX
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    // Haptic feedback for better UX (only on native platforms)
+    if (Platform.OS !== 'web') {
+      try {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      } catch (e) {
+        // Silently ignore haptic errors
+      }
+    }
     onPress?.();
   };
 

@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Speech from 'expo-speech';
 import { LargeButton } from '../../components/common';
 import { colors, typography, spacing, borderRadius, shadows } from '../../theme';
@@ -39,7 +40,14 @@ const OnboardingStep3 = ({ navigation, route }) => {
     }
   };
 
-  const handleContinue = () => {
+  const handleContinue = async () => {
+    // Set first time to false so we don't show onboarding again
+    try {
+      await AsyncStorage.setItem('isFirstTime', 'false');
+    } catch (e) {
+      console.error('Error saving onboarding status:', e);
+    }
+
     // Navigate to login/register
     navigation.navigate('Login', { 
       language, 

@@ -8,20 +8,26 @@ import {
   ScrollView,
   TouchableOpacity,
   Alert,
+  Platform,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { colors, typography, spacing } from '../../theme';
 import { LargeButton, LargeCard } from '../../components/common';
+import { logout } from '../../services/authService';
+
+import { BACKEND_URL as API_BASE } from '../../config/backend';
 
 // Default profile data for display
 const DEFAULT_USER = {
   fullName: 'Guest User',
+  full_name: 'Guest User',
   phone: '+91 XXXXX XXXXX',
   city: 'Not set',
   age: null,
   language: 'English',
   emergencyContact: 'Not set',
+  avatar_emoji: '🧑',
 };
 
 const ProfileScreen = ({ navigation }) => {
@@ -34,15 +40,40 @@ const ProfileScreen = ({ navigation }) => {
 
   const loadUserProfile = async () => {
     try {
+      setLoading(true);
+      const token = await AsyncStorage.getItem('userToken');
+      
+      // Try fetching fresh profile from backend
+      try {
+        const resp = await fetch(`${API_BASE}/me`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (resp.ok) {
+          const data = await resp.json();
+          if (data.user) {
+            const userData = data.user;
+            if (!userData.full_name && userData.name) {
+              userData.full_name = userData.name;
+            }
+            setUser({ ...DEFAULT_USER, ...userData });
+            await AsyncStorage.setItem('userProfile', JSON.stringify(userData));
+            setLoading(false);
+            return;
+          }
+        }
+      } catch (e) {
+        console.warn('Failed to fetch profile from backend:', e);
+      }
+
       const profileJson = await AsyncStorage.getItem('userProfile');
       if (profileJson) {
         const profile = JSON.parse(profileJson);
+        if (!profile.full_name && profile.name) {
+          profile.full_name = profile.name;
+        }
         setUser({
           ...DEFAULT_USER,
           ...profile,
-          // Format phone for display
-          phone: profile.phone || DEFAULT_USER.phone,
-          fullName: profile.fullName || DEFAULT_USER.fullName,
         });
       }
     } catch (error) {
@@ -53,6 +84,14 @@ const ProfileScreen = ({ navigation }) => {
   };
 
   const handleLogout = async () => {
+    if (Platform.OS === 'web') {
+      const confirmed = window.confirm('Are you sure you want to logout?');
+      if (confirmed) {
+        await logout();
+      }
+      return;
+    }
+
     Alert.alert(
       'Logout',
       'Are you sure you want to logout?',
@@ -62,11 +101,8 @@ const ProfileScreen = ({ navigation }) => {
           text: 'Logout',
           style: 'destructive',
           onPress: async () => {
-            await AsyncStorage.multiRemove(['userToken', 'userRole', 'userProfile']);
-            navigation.reset({
-              index: 0,
-              routes: [{ name: 'Auth' }],
-            });
+            await logout();
+            // App.js will handle navigation reset via state change
           },
         },
       ]
@@ -133,13 +169,9 @@ const ProfileScreen = ({ navigation }) => {
         {/* Profile Card */}
         <View style={styles.profileCard}>
           <View style={styles.avatarContainer}>
-            <MaterialCommunityIcons 
-              name="account-circle" 
-              size={80} 
-              color={colors.primary.main} 
-            />
+            <Text style={{ fontSize: 72 }}>{user.avatar_emoji || '🧑'}</Text>
           </View>
-          <Text style={styles.userName}>{user.fullName}</Text>
+          <Text style={styles.userName}>{user.full_name || user.name || user.fullName}</Text>
           <Text style={styles.userPhone}>{user.phone}</Text>
           {user.city && user.city !== 'Not set' && (
             <Text style={styles.userLocation}>📍 {user.city}</Text>

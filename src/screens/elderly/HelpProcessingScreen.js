@@ -13,7 +13,7 @@ import { colors, typography, spacing, borderRadius } from '../../theme';
 import { getTranslation } from '../../i18n/translations';
 
 const HelpProcessingScreen = ({ navigation, route }) => {
-  const { category, transcript } = route.params || {};
+  const { category, transcript, requestId } = route.params || {};
   const [language] = useState('en');
   const t = getTranslation(language);
   
@@ -51,7 +51,7 @@ const HelpProcessingScreen = ({ navigation, route }) => {
     const timer1 = setTimeout(() => setStage(1), 1500);
     const timer2 = setTimeout(() => setStage(2), 3000);
     const timer3 = setTimeout(() => {
-      navigation.replace('HelpStatus', { category, transcript });
+      navigation.replace('HelpStatus', { category, transcript, requestId });
     }, 4500);
 
     return () => {

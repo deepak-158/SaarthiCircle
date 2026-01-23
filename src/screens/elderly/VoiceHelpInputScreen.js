@@ -7,12 +7,15 @@ import {
   SafeAreaView,
   TouchableOpacity,
   Animated,
+  Alert,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { VoiceButton, LargeButton } from '../../components/common';
 import { colors, typography, spacing, borderRadius, shadows } from '../../theme';
 import { getTranslation } from '../../i18n/translations';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { BACKEND_URL } from '../../config/backend';
 
 const VoiceHelpInputScreen = ({ navigation, route }) => {
   const { category } = route.params || {};
@@ -53,11 +56,42 @@ const VoiceHelpInputScreen = ({ navigation, route }) => {
     }, 3000);
   };
 
-  const handleSubmit = () => {
-    navigation.navigate('HelpProcessing', { 
-      category, 
-      transcript,
-    });
+  const handleSubmit = async () => {
+    try {
+      const token = await AsyncStorage.getItem('userToken');
+      if (!token) {
+        Alert.alert('Error', 'You must be logged in to request help.');
+        return;
+      }
+
+      const response = await fetch(`${BACKEND_URL}/help-requests`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          category: category?.title || 'General',
+          description: transcript,
+          priority: category?.id === 'emergency' ? 'high' : 'medium'
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to create help request');
+      }
+
+      const data = await response.json();
+      
+      navigation.navigate('HelpProcessing', { 
+        category, 
+        transcript,
+        requestId: data.request.id
+      });
+    } catch (error) {
+      console.error('Error sending help request:', error);
+      Alert.alert('Error', 'Failed to send help request. Please try again.');
+    }
   };
 
   const handleRetry = () => {

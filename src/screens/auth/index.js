@@ -6,3 +6,4 @@ export { default as OnboardingStep2 } from './OnboardingStep2';
 export { default as OnboardingStep3 } from './OnboardingStep3';
 export { default as LoginScreen } from './LoginScreen';
 export { default as RegisterScreen } from './RegisterScreen';
+export { default as VolunteerPendingScreen } from './VolunteerPendingScreen';

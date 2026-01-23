@@ -11,54 +11,52 @@ import {
   Alert,
   ActivityIndicator,
   Image,
+  Platform,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { colors, typography, spacing, borderRadius, shadows } from '../../theme';
-import { db, USER_ROLES, getVolunteerStats } from '../../config/firebase';
-import { doc, updateDoc, getDoc } from 'firebase/firestore';
+import { logout } from '../../services/authService';
+import { LargeButton } from '../../components/common';
+
+import { BACKEND_URL as API_BASE } from '../../config/backend';
+
+const availabilityOptions = [
+  { id: 'weekdays', label: 'Weekdays' },
+  { id: 'weekends', label: 'Weekends' },
+  { id: 'evenings', label: 'Evenings' },
+  { id: 'anytime', label: 'Anytime' },
+];
+
+const helpTypes = [
+  { id: 'emotional', icon: 'heart', label: 'Emotional' },
+  { id: 'daily', icon: 'tools', label: 'Daily' },
+  { id: 'health', icon: 'stethoscope', label: 'Health' },
+  { id: 'emergency', icon: 'alert-circle', label: 'Emergency' },
+];
 
 const VolunteerProfileScreen = ({ navigation }) => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [editMode, setEditMode] = useState(false);
-  const [volunteerStats, setVolunteerStats] = useState({
-    totalHelped: 0,
-    activeRequests: 0,
-  });
   const [profile, setProfile] = useState({
-    fullName: '',
+    full_name: '',
     phone: '',
     age: '',
     city: '',
     address: '',
     skills: [],
-    whyVolunteer: '',
-    helpCount: 0,
+    why_volunteer: '',
+    help_count: 0,
     rating: 0,
-    isApproved: false,
+    is_approved: false,
+    avatar_emoji: '🧑',
     availability: 'weekdays',
-    preferredHelpTypes: [],
+    preferred_help_types: [],
   });
 
   const [editedProfile, setEditedProfile] = useState({});
-
-  const helpTypes = [
-    { id: 'grocery', label: 'Grocery Shopping', icon: 'cart' },
-    { id: 'medicine', label: 'Medicine Pickup', icon: 'pill' },
-    { id: 'tech', label: 'Tech Support', icon: 'cellphone' },
-    { id: 'emotional', label: 'Emotional Support', icon: 'heart' },
-    { id: 'transport', label: 'Transportation', icon: 'car' },
-    { id: 'household', label: 'Household Tasks', icon: 'home' },
-  ];
-
-  const availabilityOptions = [
-    { id: 'weekdays', label: 'Weekdays Only' },
-    { id: 'weekends', label: 'Weekends Only' },
-    { id: 'all', label: 'All Days' },
-    { id: 'flexible', label: 'Flexible' },
-  ];
 
   useEffect(() => {
     loadProfile();
@@ -67,42 +65,40 @@ const VolunteerProfileScreen = ({ navigation }) => {
   const loadProfile = async () => {
     try {
       setLoading(true);
+      const token = await AsyncStorage.getItem('userToken');
+      
+      // Try fetching fresh profile from backend
+      try {
+        const resp = await fetch(`${API_BASE}/me`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (resp.ok) {
+          const data = await resp.json();
+          if (data.user) {
+            const userData = data.user;
+            if (!userData.full_name && userData.name) {
+              userData.full_name = userData.name;
+            }
+            const merged = { ...profile, ...userData };
+            setProfile(merged);
+            setEditedProfile(merged);
+            await AsyncStorage.setItem('userProfile', JSON.stringify(userData));
+            setLoading(false);
+            return;
+          }
+        }
+      } catch (e) {
+        console.warn('Failed to fetch profile from backend:', e);
+      }
+
       const profileJson = await AsyncStorage.getItem('userProfile');
       if (profileJson) {
         const storedProfile = JSON.parse(profileJson);
+        if (!storedProfile.full_name && storedProfile.name) {
+          storedProfile.full_name = storedProfile.name;
+        }
         setProfile(prev => ({ ...prev, ...storedProfile }));
         setEditedProfile(storedProfile);
-        
-        // Try to load stats from Firebase
-        const volunteerId = storedProfile.id || storedProfile.uid;
-        if (volunteerId) {
-          try {
-            const stats = await getVolunteerStats(volunteerId);
-            setVolunteerStats(stats);
-            
-            // Update help count from stats
-            if (stats.totalHelped > 0) {
-              setProfile(prev => ({ ...prev, helpCount: stats.totalHelped }));
-            }
-          } catch (statsError) {
-            console.log('Could not load volunteer stats:', statsError);
-          }
-          
-          // Try to get latest profile from Firebase
-          try {
-            const userDoc = await getDoc(doc(db, 'users', volunteerId));
-            if (userDoc.exists()) {
-              const firebaseProfile = userDoc.data();
-              const mergedProfile = { ...storedProfile, ...firebaseProfile, id: volunteerId };
-              setProfile(prev => ({ ...prev, ...mergedProfile }));
-              setEditedProfile(mergedProfile);
-              // Update AsyncStorage with latest data
-              await AsyncStorage.setItem('userProfile', JSON.stringify(mergedProfile));
-            }
-          } catch (fbError) {
-            console.log('Could not load Firebase profile:', fbError);
-          }
-        }
       }
     } catch (error) {
       console.error('Error loading profile:', error);
@@ -122,32 +118,67 @@ const VolunteerProfileScreen = ({ navigation }) => {
   };
 
   const handleSave = async () => {
-    if (!editedProfile.fullName?.trim()) {
+    const nameToSave = editedProfile.full_name;
+    if (!nameToSave?.trim()) {
       Alert.alert('Required', 'Please enter your full name');
       return;
     }
 
     setSaving(true);
     try {
-      // Update in Firestore
-      if (profile.id) {
-        const userRef = doc(db, 'users', profile.id);
-        await updateDoc(userRef, {
-          ...editedProfile,
-          updatedAt: new Date().toISOString(),
-        });
-      }
+      const token = await AsyncStorage.getItem('userToken');
+      
+      // Prepare all fields for the server's metadata storage
+      const updateData = {
+        full_name: editedProfile.full_name,
+        name: editedProfile.full_name,
+        gender: editedProfile.gender,
+        phone: editedProfile.phone,
+        role: editedProfile.role,
+        age: editedProfile.age,
+        city: editedProfile.city,
+        address: editedProfile.address,
+        skills: editedProfile.skills,
+        why_volunteer: editedProfile.why_volunteer,
+        availability: editedProfile.availability,
+        preferred_help_types: editedProfile.preferred_help_types,
+      };
 
-      // Update local storage
-      const updatedProfile = { ...profile, ...editedProfile };
+      const resp = await fetch(`${API_BASE}/profile`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify(updateData),
+      });
+      
+      const result = await resp.json();
+      if (!resp.ok) throw new Error(result?.error || 'Failed to update profile');
+
+      // The server returns { profile: data }
+      const serverProfile = result.profile;
+      
+      // Update local storage and state
+      // We merge with existing profile to keep frontend-only fields if any
+      // We also preserve edited fields that server might have ignored (like age, city)
+      // by merging editedProfile back in.
+      const updatedProfile = { 
+        ...profile,
+        ...editedProfile, // Keep what the user just typed (age, city, etc.)
+        ...serverProfile, // Overwrite with server truth for the fields it supports
+        full_name: serverProfile.name || editedProfile.full_name 
+      };
+      
       await AsyncStorage.setItem('userProfile', JSON.stringify(updatedProfile));
       setProfile(updatedProfile);
+      setEditedProfile(updatedProfile);
       setEditMode(false);
       
       Alert.alert('Success', 'Profile updated successfully!');
     } catch (error) {
       console.error('Error saving profile:', error);
-      Alert.alert('Error', 'Failed to save profile. Please try again.');
+      Alert.alert('Error', error.message || 'Failed to save profile. Please try again.');
     } finally {
       setSaving(false);
     }
@@ -158,14 +189,22 @@ const VolunteerProfileScreen = ({ navigation }) => {
   };
 
   const toggleHelpType = (helpTypeId) => {
-    const current = editedProfile.preferredHelpTypes || [];
+    const current = editedProfile.preferred_help_types || [];
     const updated = current.includes(helpTypeId)
       ? current.filter(id => id !== helpTypeId)
       : [...current, helpTypeId];
-    updateField('preferredHelpTypes', updated);
+    updateField('preferred_help_types', updated);
   };
 
   const handleLogout = async () => {
+    if (Platform.OS === 'web') {
+      const confirmed = window.confirm('Are you sure you want to logout?');
+      if (confirmed) {
+        await logout();
+      }
+      return;
+    }
+
     Alert.alert(
       'Logout',
       'Are you sure you want to logout?',
@@ -175,11 +214,7 @@ const VolunteerProfileScreen = ({ navigation }) => {
           text: 'Logout',
           style: 'destructive',
           onPress: async () => {
-            await AsyncStorage.multiRemove(['userToken', 'userRole', 'userProfile']);
-            navigation.reset({
-              index: 0,
-              routes: [{ name: 'Auth' }],
-            });
+            await logout();
           },
         },
       ]
@@ -211,9 +246,14 @@ const VolunteerProfileScreen = ({ navigation }) => {
           </TouchableOpacity>
           <Text style={styles.headerTitle}>My Profile</Text>
           {!editMode ? (
-            <TouchableOpacity style={styles.editButton} onPress={handleEdit}>
-              <MaterialCommunityIcons name="pencil" size={24} color={colors.neutral.white} />
-            </TouchableOpacity>
+            <View style={{ flexDirection: 'row' }}>
+              <TouchableOpacity style={styles.editButton} onPress={handleEdit}>
+                <MaterialCommunityIcons name="pencil" size={24} color={colors.neutral.white} />
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.editButton} onPress={handleLogout}>
+                <MaterialCommunityIcons name="logout" size={24} color={colors.neutral.white} />
+              </TouchableOpacity>
+            </View>
           ) : (
             <View style={{ width: 40 }} />
           )}
@@ -222,16 +262,16 @@ const VolunteerProfileScreen = ({ navigation }) => {
         {/* Profile Avatar */}
         <View style={styles.avatarContainer}>
           <View style={styles.avatar}>
-            <MaterialCommunityIcons name="account" size={60} color={colors.primary.main} />
+            <Text style={{ fontSize: 50 }}>{profile.avatar_emoji || '🧑'}</Text>
           </View>
-          {profile.isApproved && (
+          {profile.is_approved && (
             <View style={styles.verifiedBadge}>
               <MaterialCommunityIcons name="check-decagram" size={24} color="#4CAF50" />
             </View>
           )}
         </View>
 
-        <Text style={styles.profileName}>{profile.fullName || 'Volunteer'}</Text>
+        <Text style={styles.profileName}>{profile.full_name || profile.name || 'Volunteer'}</Text>
         <View style={styles.roleTag}>
           <MaterialCommunityIcons name="hand-heart" size={16} color={colors.neutral.white} />
           <Text style={styles.roleTagText}>Volunteer</Text>
@@ -240,7 +280,7 @@ const VolunteerProfileScreen = ({ navigation }) => {
         {/* Stats Row */}
         <View style={styles.statsRow}>
           <View style={styles.statBox}>
-            <Text style={styles.statValue}>{profile.helpCount || 0}</Text>
+            <Text style={styles.statValue}>{profile.help_count || 0}</Text>
             <Text style={styles.statLabel}>Helped</Text>
           </View>
           <View style={styles.statDivider} />
@@ -251,12 +291,12 @@ const VolunteerProfileScreen = ({ navigation }) => {
           <View style={styles.statDivider} />
           <View style={styles.statBox}>
             <MaterialCommunityIcons 
-              name={profile.isApproved ? 'check-circle' : 'clock-outline'} 
+              name={profile.is_approved ? 'check-circle' : 'clock-outline'} 
               size={24} 
-              color={profile.isApproved ? '#4CAF50' : '#FF9800'} 
+              color={profile.is_approved ? '#4CAF50' : '#FF9800'} 
             />
             <Text style={[styles.statLabel, { marginTop: 4 }]}>
-              {profile.isApproved ? 'Approved' : 'Pending'}
+              {profile.is_approved ? 'Approved' : 'Pending'}
             </Text>
           </View>
         </View>
@@ -277,12 +317,12 @@ const VolunteerProfileScreen = ({ navigation }) => {
               {editMode ? (
                 <TextInput
                   style={styles.input}
-                  value={editedProfile.fullName}
-                  onChangeText={(text) => updateField('fullName', text)}
+                  value={editedProfile.full_name}
+                  onChangeText={(text) => updateField('full_name', text)}
                   placeholder="Enter full name"
                 />
               ) : (
-                <Text style={styles.fieldValue}>{profile.fullName || 'Not set'}</Text>
+                <Text style={styles.fieldValue}>{profile.full_name || profile.name || 'Not set'}</Text>
               )}
             </View>
           </View>
@@ -412,8 +452,8 @@ const VolunteerProfileScreen = ({ navigation }) => {
           <View style={styles.helpTypesGrid}>
             {helpTypes.map((helpType) => {
               const isSelected = editMode 
-                ? (editedProfile.preferredHelpTypes || []).includes(helpType.id)
-                : (profile.preferredHelpTypes || []).includes(helpType.id);
+                ? (editedProfile.preferred_help_types || []).includes(helpType.id)
+                : (profile.preferred_help_types || []).includes(helpType.id);
               
               return (
                 <TouchableOpacity
@@ -442,15 +482,15 @@ const VolunteerProfileScreen = ({ navigation }) => {
           {editMode ? (
             <TextInput
               style={[styles.input, styles.textArea]}
-              value={editedProfile.whyVolunteer}
-              onChangeText={(text) => updateField('whyVolunteer', text)}
+              value={editedProfile.why_volunteer}
+              onChangeText={(text) => updateField('why_volunteer', text)}
               placeholder="Share your motivation..."
               multiline
               numberOfLines={3}
             />
           ) : (
             <Text style={styles.motivationText}>
-              {profile.whyVolunteer || 'No motivation shared yet'}
+              {profile.why_volunteer || 'No motivation shared yet'}
             </Text>
           )}
         </View>
@@ -477,10 +517,14 @@ const VolunteerProfileScreen = ({ navigation }) => {
 
         {/* Logout Button */}
         {!editMode && (
-          <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
-            <MaterialCommunityIcons name="logout" size={24} color={colors.accent.red} />
-            <Text style={styles.logoutText}>Logout</Text>
-          </TouchableOpacity>
+          <View style={{ marginTop: spacing.lg }}>
+            <LargeButton
+              title="Logout"
+              onPress={handleLogout}
+              variant="outline"
+              icon="logout"
+            />
+          </View>
         )}
 
         <View style={{ height: spacing.xxl }} />
@@ -756,23 +800,6 @@ const styles = StyleSheet.create({
     fontSize: typography.sizes.md,
     color: colors.neutral.white,
     fontWeight: typography.weights.semiBold,
-  },
-  logoutButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: spacing.md,
-    backgroundColor: colors.neutral.white,
-    borderRadius: borderRadius.md,
-    borderWidth: 1,
-    borderColor: colors.accent.red,
-    marginTop: spacing.md,
-  },
-  logoutText: {
-    fontSize: typography.sizes.md,
-    color: colors.accent.red,
-    fontWeight: typography.weights.semiBold,
-    marginLeft: spacing.sm,
   },
 });
 

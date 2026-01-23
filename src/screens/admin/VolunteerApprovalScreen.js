@@ -7,21 +7,19 @@ import {
   SafeAreaView,
   ScrollView,
   TouchableOpacity,
+  Pressable,
   Alert,
   RefreshControl,
   ActivityIndicator,
+  Platform,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { colors, typography, spacing } from '../../theme';
 import { LargeButton } from '../../components/common';
-import {
-  getPendingVolunteers,
-  approveVolunteer,
-  rejectVolunteer,
-  getUsersByRole,
-  USER_ROLES,
-} from '../../config/firebase';
+import { BACKEND_URL as API_BASE } from '../../config/backend';
+import { logout } from '../../services/authService';
+import { createNotification } from '../../config/firebase';
 
 const VolunteerApprovalScreen = ({ navigation }) => {
   const [pendingVolunteers, setPendingVolunteers] = useState([]);
@@ -29,156 +27,318 @@ const VolunteerApprovalScreen = ({ navigation }) => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState('pending');
-  const [adminUid, setAdminUid] = useState(null);
+  const [adminToken, setAdminToken] = useState(null);
+  const [processingId, setProcessingId] = useState(null); // Track which volunteer is being processed
 
   useEffect(() => {
     loadAdminInfo();
-    loadVolunteers();
   }, []);
+
+  useEffect(() => {
+    if (adminToken) {
+      loadVolunteers();
+    }
+  }, [adminToken]);
 
   const loadAdminInfo = async () => {
     try {
-      const userToken = await AsyncStorage.getItem('userToken');
-      setAdminUid(userToken);
+      const token = await AsyncStorage.getItem('userToken');
+      setAdminToken(token);
     } catch (error) {
       console.error('Load admin info error:', error);
     }
   };
 
   const loadVolunteers = async () => {
+    if (!adminToken) {
+      console.log('[LOAD] No admin token, skipping load');
+      return;
+    }
     try {
+      console.log('[LOAD] Starting to load volunteers...');
       setLoading(true);
       
-      // Mock data for fallback
-      const mockPending = [
-        {
-          id: 'mock1',
-          fullName: 'Rahul Sharma',
-          email: 'rahul@example.com',
-          phone: '+91 98765 43210',
-          city: 'Delhi',
-          skills: ['Grocery Shopping', 'Companionship'],
-          whyVolunteer: 'I want to help elderly people in my community.',
-          createdAt: new Date(),
-        },
-        {
-          id: 'mock2',
-          fullName: 'Priya Patel',
-          email: 'priya@example.com',
-          phone: '+91 87654 32109',
-          city: 'Mumbai',
-          skills: ['Healthcare', 'Technology Help'],
-          whyVolunteer: 'My grandmother inspired me to help seniors.',
-          createdAt: new Date(),
-        },
-      ];
+      const [pendingResp, approvedResp] = await Promise.all([
+        fetch(`${API_BASE}/admin/volunteers/pending`, {
+          headers: { 'Authorization': `Bearer ${adminToken}` }
+        }),
+        fetch(`${API_BASE}/admin/volunteers/approved`, {
+          headers: { 'Authorization': `Bearer ${adminToken}` }
+        })
+      ]);
 
-      const mockApproved = [
-        {
-          id: 'mock3',
-          fullName: 'Amit Kumar',
-          email: 'amit@example.com',
-          phone: '+91 76543 21098',
-          city: 'Bangalore',
-          skills: ['Transportation', 'Document Help'],
-          helpCount: 15,
-          rating: 4.8,
-          isApproved: true,
-          status: 'approved',
-        },
-      ];
+      console.log('[LOAD] Pending response status:', pendingResp.status);
+      console.log('[LOAD] Approved response status:', approvedResp.status);
 
-      // Try to load from Firebase
-      let firebasePending = [];
-      let firebaseApproved = [];
+      if (pendingResp.status === 401 || approvedResp.status === 401) {
+        Alert.alert('Session Expired', 'Your session has expired. Please login again.');
+        await logout();
+        return;
+      }
+
+      if (!pendingResp.ok) {
+        const errorText = await pendingResp.text();
+        console.error('[LOAD] Pending volunteers fetch failed:', errorText);
+        throw new Error(`Failed to fetch pending volunteers: ${pendingResp.status}`);
+      }
+
+      if (!approvedResp.ok) {
+        const errorText = await approvedResp.text();
+        console.error('[LOAD] Approved volunteers fetch failed:', errorText);
+        throw new Error(`Failed to fetch approved volunteers: ${approvedResp.status}`);
+      }
+
+      const pendingData = await pendingResp.json();
+      const approvedData = await approvedResp.json();
+
+      console.log('[LOAD] Pending volunteers count:', pendingData.volunteers?.length || 0);
+      console.log('[LOAD] Approved volunteers count:', approvedData.volunteers?.length || 0);
+
+      const mappedPending = (pendingData.volunteers || []).map(v => ({
+        id: v.id,
+        fullName: v.name || v.full_name || 'Anonymous',
+        email: v.email,
+        phone: v.phone || 'N/A',
+        city: v.city || 'N/A',
+        skills: v.skills || [],
+        whyVolunteer: v.why_volunteer || v.motivation || '',
+        createdAt: new Date(v.updated_at || v.created_at || Date.now()),
+        role: v.role, // Include role for debugging
+      }));
       
-      try {
-        // Get pending volunteers from Firebase
-        const pending = await getPendingVolunteers();
-        if (pending && pending.length > 0) {
-          firebasePending = pending.map(v => ({
-            ...v,
-            skills: v.skills || ['General Help'],
-            whyVolunteer: v.whyVolunteer || v.bio || 'Wants to help seniors',
-            createdAt: v.createdAt?.toDate?.() || new Date(),
-          }));
-        }
-
-        // Get approved volunteers from Firebase
-        const allVolunteers = await getUsersByRole(USER_ROLES.VOLUNTEER);
-        if (allVolunteers && allVolunteers.length > 0) {
-          firebaseApproved = allVolunteers
-            .filter(v => v.status === 'approved' || v.isApproved)
-            .map(v => ({
-              ...v,
-              skills: v.skills || ['General Help'],
-              helpCount: v.helpCount || 0,
-              rating: v.rating || 'N/A',
-              isApproved: true,
-            }));
-        }
-      } catch (fbError) {
-        console.log('Firebase data not fully available:', fbError.message);
+      const mappedApproved = (approvedData.volunteers || []).map(v => ({
+        id: v.id,
+        fullName: v.name || v.full_name || 'Anonymous',
+        email: v.email,
+        phone: v.phone || 'N/A',
+        city: v.city || 'N/A',
+        skills: v.skills || [],
+        helpCount: v.help_count || 0,
+        rating: v.rating || 0,
+        isApproved: true,
+        updatedAt: new Date(v.updated_at || v.created_at || Date.now()),
+        role: v.role,
+      }));
+      
+      console.log('[LOAD] Mapped pending volunteers:', mappedPending.length);
+      console.log('[LOAD] Mapped approved volunteers:', mappedApproved.length);
+      if (mappedPending.length > 0) {
+        console.log('[LOAD] Sample pending volunteer:', JSON.stringify(mappedPending[0], null, 2));
       }
-
-      // Use Firebase data if available, otherwise combine with mock data
-      if (firebasePending.length > 0) {
-        setPendingVolunteers(firebasePending);
-      } else {
-        setPendingVolunteers(mockPending);
+      if (mappedApproved.length > 0) {
+        console.log('[LOAD] Sample approved volunteer:', JSON.stringify(mappedApproved[0], null, 2));
       }
-
-      if (firebaseApproved.length > 0) {
-        setApprovedVolunteers(firebaseApproved);
-      } else {
-        setApprovedVolunteers(mockApproved);
-      }
+      
+      setPendingVolunteers(mappedPending);
+      setApprovedVolunteers(mappedApproved);
 
     } catch (error) {
-      console.error('Load volunteers error:', error);
-      // Fallback to empty with mock
-      setPendingVolunteers([]);
-      setApprovedVolunteers([]);
+      console.error('[LOAD] Load volunteers error:', error);
+      console.error('[LOAD] Error stack:', error.stack);
+      Alert.alert('Error', `Failed to load volunteers: ${error.message}`);
     } finally {
       setLoading(false);
       setRefreshing(false);
+      console.log('[LOAD] Load volunteers completed');
     }
   };
 
   const handleApprove = async (volunteer) => {
-    Alert.alert(
-      'Approve Volunteer',
-      `Are you sure you want to approve ${volunteer.fullName} as a volunteer?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Approve',
-          onPress: async () => {
-            try {
-              // Try to call Firebase function
-              if (!volunteer.id.startsWith('mock')) {
-                await approveVolunteer(volunteer.id, adminUid);
-              }
-              
-              // Update local state
-              setPendingVolunteers(prev => prev.filter(v => v.id !== volunteer.id));
-              setApprovedVolunteers(prev => [...prev, { 
-                ...volunteer, 
-                isApproved: true,
-                status: 'approved',
-                helpCount: 0,
-                rating: 'N/A',
-              }]);
-              
-              Alert.alert('Success', `${volunteer.fullName} has been approved as a volunteer.`);
-            } catch (error) {
-              console.error('Approve error:', error);
-              Alert.alert('Error', 'Failed to approve volunteer. Please try again.');
+    console.log('[APPROVE] ========== HANDLE APPROVE CALLED ==========');
+    console.log('[APPROVE] Volunteer ID:', volunteer.id);
+    console.log('[APPROVE] Volunteer Name:', volunteer.fullName);
+    console.log('[APPROVE] Platform:', Platform.OS);
+    console.log('[APPROVE] Current processingId:', processingId);
+    
+    // For web, use window.confirm instead of Alert.alert
+    if (Platform.OS === 'web') {
+      console.log('[APPROVE] Web platform detected, using window.confirm');
+      const confirmed = window.confirm(`Are you sure you want to approve ${volunteer.fullName} as a volunteer?`);
+      if (!confirmed) {
+        console.log('[APPROVE] User cancelled (web confirm)');
+        return;
+      }
+      console.log('[APPROVE] User confirmed (web), proceeding with approval...');
+      // Continue directly to approval
+    } else {
+      console.log('[APPROVE] Native platform, using Alert.alert');
+      Alert.alert(
+        'Approve Volunteer',
+        `Are you sure you want to approve ${volunteer.fullName} as a volunteer?`,
+        [
+          { 
+            text: 'Cancel', 
+            style: 'cancel',
+            onPress: () => {
+              console.log('[APPROVE] User cancelled approval');
             }
           },
-        },
-      ]
-    );
+          {
+            text: 'Approve',
+            onPress: async () => {
+              console.log('[APPROVE] Alert onPress callback triggered');
+              await executeApproval(volunteer);
+            },
+          },
+        ],
+        { cancelable: true }
+      );
+      console.log('[APPROVE] Alert.alert called, waiting for user response');
+      return;
+    }
+    
+    // Execute approval for web or if we reach here
+    await executeApproval(volunteer);
+  };
+
+  const executeApproval = async (volunteer) => {
+    console.log('[APPROVE] ========== EXECUTE APPROVAL STARTED ==========');
+    console.log('[APPROVE] ProcessingId check:', processingId);
+    
+    if (processingId) {
+      console.log('[APPROVE] Already processing, returning early');
+      return;
+    }
+    
+    console.log('[APPROVE] Setting processingId to:', volunteer.id);
+    setProcessingId(volunteer.id);
+    
+    try {
+      console.log('[APPROVE] Starting approval for:', volunteer.id);
+      if (!adminToken) {
+        Alert.alert('Error', 'Admin token is missing. Please login again.');
+        setProcessingId(null);
+        return;
+      }
+
+      // Get admin user info for notification
+      const adminProfileJson = await AsyncStorage.getItem('userProfile');
+      const adminProfile = adminProfileJson ? JSON.parse(adminProfileJson) : null;
+      const adminName = adminProfile?.name || adminProfile?.full_name || 'Admin';
+
+      console.log('[APPROVE] Making API call to:', `${API_BASE}/admin/volunteers/${volunteer.id}/approve`);
+      console.log('[APPROVE] Token present:', !!adminToken);
+      console.log('[APPROVE] Token length:', adminToken?.length);
+      
+      const resp = await fetch(`${API_BASE}/admin/volunteers/${volunteer.id}/approve`, {
+        method: 'POST',
+        headers: { 
+          'Authorization': `Bearer ${adminToken}`,
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        }
+      });
+
+      console.log('[APPROVE] Response status:', resp.status);
+      const responseText = await resp.text();
+      console.log('[APPROVE] Response body (raw):', responseText);
+      console.log('[APPROVE] Response headers:', JSON.stringify([...resp.headers.entries()]));
+
+      if (resp.status === 401) {
+        Alert.alert('Session Expired', 'Your session has expired. Please login again.');
+        await logout();
+        setProcessingId(null);
+        return;
+      }
+
+      if (resp.status === 403) {
+        Alert.alert('Access Denied', 'You do not have permission to approve volunteers. Please contact an administrator.');
+        setProcessingId(null);
+        return;
+      }
+
+      if (!resp.ok) {
+        let errData = {};
+        try {
+          errData = JSON.parse(responseText);
+        } catch (e) {
+          errData = { error: responseText || `Approval failed with status ${resp.status}` };
+        }
+        console.error('[APPROVE] Failed details:', errData);
+        console.error('[APPROVE] Full error:', {
+          status: resp.status,
+          statusText: resp.statusText,
+          body: errData
+        });
+        Alert.alert('Approval Failed', errData.error || `Failed to approve volunteer. Status: ${resp.status}`);
+        setProcessingId(null);
+        return;
+      }
+      
+      let data;
+      try {
+        data = JSON.parse(responseText);
+        console.log('[APPROVE] Success data:', JSON.stringify(data, null, 2));
+      } catch (parseError) {
+        console.error('[APPROVE] Failed to parse response:', parseError);
+        console.error('[APPROVE] Response text was:', responseText);
+        Alert.alert('Error', 'Received invalid response from server. Please try again.');
+        setProcessingId(null);
+        return;
+      }
+
+      // Verify the response indicates success
+      if (!data.success && !data.volunteer) {
+        console.error('[APPROVE] Response does not indicate success:', data);
+        Alert.alert('Error', 'Server response did not confirm approval. Please check the logs.');
+        setProcessingId(null);
+        return;
+      }
+      
+      console.log('[APPROVE] Approval confirmed, creating notifications...');
+      
+      // Create notifications
+      try {
+        // Notification for applicant
+        await createNotification({
+          type: 'approval',
+          title: 'Application Approved! 🎉',
+          message: `Congratulations! Your volunteer application has been approved. You can now start helping seniors in your community.`,
+          targetUserId: volunteer.id,
+          targetRole: 'volunteer',
+          actionRoute: null,
+        });
+        console.log('[APPROVE] Notification created for applicant');
+
+        // Notification for admin
+        await createNotification({
+          type: 'approval',
+          title: 'Volunteer Approved',
+          message: `You approved ${volunteer.fullName} as a volunteer.`,
+          targetRole: 'admin',
+          actionRoute: null,
+        });
+        console.log('[APPROVE] Notification created for admin');
+      } catch (notifError) {
+        console.warn('[APPROVE] Failed to create notifications:', notifError);
+        // Don't fail the approval if notifications fail
+      }
+      
+      console.log('[APPROVE] Reloading volunteer lists...');
+      
+      // Reload the volunteer lists to get fresh data from server
+      await loadVolunteers();
+      
+      console.log('[APPROVE] Volunteer lists reloaded');
+      
+      // Verify the volunteer was moved
+      setTimeout(async () => {
+        await loadVolunteers();
+        console.log('[APPROVE] Second reload completed for verification');
+      }, 1000);
+      
+      Alert.alert('Success', `${volunteer.fullName} has been approved as a volunteer.`);
+    } catch (error) {
+      console.error('[APPROVE] ========== ERROR CAUGHT ==========');
+      console.error('[APPROVE] Error:', error);
+      console.error('[APPROVE] Error stack:', error.stack);
+      console.error('[APPROVE] Error message:', error.message);
+      Alert.alert('Error', error.message || 'Failed to approve volunteer. Please try again.');
+    } finally {
+      console.log('[APPROVE] Finally block - clearing processingId');
+      setProcessingId(null);
+      console.log('[APPROVE] ========== EXECUTE APPROVAL COMPLETED ==========');
+    }
   };
 
   const handleReject = async (volunteer) => {
@@ -191,19 +351,92 @@ const VolunteerApprovalScreen = ({ navigation }) => {
           text: 'Reject',
           style: 'destructive',
           onPress: async () => {
+            if (processingId) return; // Prevent double-clicks
+            setProcessingId(volunteer.id);
             try {
-              // Try to call Firebase function
-              if (!volunteer.id.startsWith('mock')) {
-                await rejectVolunteer(volunteer.id, adminUid, 'Not meeting requirements');
+              console.log('[REJECT] Starting rejection for:', volunteer.id);
+              if (!adminToken) {
+                Alert.alert('Error', 'Admin token is missing. Please login again.');
+                setProcessingId(null);
+                return;
+              }
+
+              // Get admin user info for notification
+              const adminProfileJson = await AsyncStorage.getItem('userProfile');
+              const adminProfile = adminProfileJson ? JSON.parse(adminProfileJson) : null;
+              const adminName = adminProfile?.name || adminProfile?.full_name || 'Admin';
+
+              console.log('[REJECT] Making API call to:', `${API_BASE}/admin/volunteers/${volunteer.id}/reject`);
+              console.log('[REJECT] Token present:', !!adminToken);
+              
+              const resp = await fetch(`${API_BASE}/admin/volunteers/${volunteer.id}/reject`, {
+                method: 'POST',
+                headers: { 
+                  'Authorization': `Bearer ${adminToken}`,
+                  'Content-Type': 'application/json',
+                  'Accept': 'application/json'
+                }
+              });
+
+              console.log('[REJECT] Response status:', resp.status);
+              const responseText = await resp.text();
+              console.log('[REJECT] Response body:', responseText);
+
+              if (resp.status === 401) {
+                Alert.alert('Session Expired', 'Your session has expired. Please login again.');
+                await logout();
+                setProcessingId(null);
+                return;
+              }
+
+              if (!resp.ok) {
+                let errData = {};
+                try {
+                  errData = JSON.parse(responseText);
+                } catch (e) {
+                  errData = { error: responseText || 'Rejection failed' };
+                }
+                console.error('[REJECT] Failed details:', errData);
+                throw new Error(errData.error || 'Rejection failed');
               }
               
-              // Update local state
-              setPendingVolunteers(prev => prev.filter(v => v.id !== volunteer.id));
+              const data = JSON.parse(responseText);
+              console.log('[REJECT] Success data:', data);
+
+              // Create notifications
+              try {
+                // Notification for applicant
+                await createNotification({
+                  type: 'system',
+                  title: 'Application Status Update',
+                  message: `Your volunteer application has been reviewed. Unfortunately, it was not approved at this time. You can contact support for more information.`,
+                  targetUserId: volunteer.id,
+                  targetRole: 'volunteer',
+                  actionRoute: null,
+                });
+
+                // Notification for admin
+                await createNotification({
+                  type: 'approval',
+                  title: 'Volunteer Rejected',
+                  message: `You rejected ${volunteer.fullName}'s volunteer application.`,
+                  targetRole: 'admin',
+                  actionRoute: null,
+                });
+              } catch (notifError) {
+                console.warn('[REJECT] Failed to create notifications:', notifError);
+                // Don't fail the rejection if notifications fail
+              }
+              
+              // Reload the volunteer lists to get fresh data from server
+              await loadVolunteers();
               
               Alert.alert('Done', `${volunteer.fullName}'s application has been rejected.`);
             } catch (error) {
-              console.error('Reject error:', error);
-              Alert.alert('Error', 'Failed to reject volunteer. Please try again.');
+              console.error('[REJECT] Error:', error);
+              Alert.alert('Error', error.message || 'Failed to reject volunteer. Please try again.');
+            } finally {
+              setProcessingId(null);
             }
           },
         },
@@ -237,18 +470,24 @@ const VolunteerApprovalScreen = ({ navigation }) => {
       <View style={styles.skillsContainer}>
         <Text style={styles.detailLabel}>Skills:</Text>
         <View style={styles.skillsRow}>
-          {volunteer.skills?.map((skill, index) => (
-            <View key={index} style={styles.skillBadge}>
-              <Text style={styles.skillText}>{skill}</Text>
-            </View>
-          ))}
+          {volunteer.skills && volunteer.skills.length > 0 ? (
+            volunteer.skills.map((skill, index) => (
+              <View key={index} style={styles.skillBadge}>
+                <Text style={styles.skillText}>{skill}</Text>
+              </View>
+            ))
+          ) : (
+            <Text style={styles.detailValue}>No skills listed</Text>
+          )}
         </View>
       </View>
 
-      {isPending && volunteer.whyVolunteer && (
+      {isPending && (
         <View style={styles.motivationContainer}>
           <Text style={styles.detailLabel}>Why volunteer:</Text>
-          <Text style={styles.motivationText}>"{volunteer.whyVolunteer}"</Text>
+          <Text style={styles.motivationText}>
+            {volunteer.whyVolunteer ? `"${volunteer.whyVolunteer}"` : "No motivation provided"}
+          </Text>
         </View>
       )}
 
@@ -269,20 +508,62 @@ const VolunteerApprovalScreen = ({ navigation }) => {
 
       {isPending && (
         <View style={styles.actionButtons}>
-          <TouchableOpacity
-            style={[styles.actionButton, styles.rejectButton]}
-            onPress={() => handleReject(volunteer)}
+          <Pressable
+            style={({ pressed }) => [
+              styles.actionButton, 
+              styles.rejectButton,
+              { 
+                opacity: (pressed || processingId === volunteer.id) ? 0.5 : 1,
+                disabled: processingId === volunteer.id
+              }
+            ]}
+            onPress={() => {
+              if (processingId === volunteer.id) return;
+              console.log('[BUTTON] Reject button pressed for:', volunteer.fullName, 'ID:', volunteer.id);
+              handleReject(volunteer);
+            }}
+            disabled={processingId === volunteer.id}
+            accessibilityRole="button"
+            accessibilityLabel={`Reject ${volunteer.fullName}`}
+            importantForAccessibility="yes"
           >
-            <MaterialCommunityIcons name="close" size={20} color={colors.status.error} />
-            <Text style={[styles.actionButtonText, { color: colors.status.error }]}>Reject</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.actionButton, styles.approveButton]}
-            onPress={() => handleApprove(volunteer)}
+            {processingId === volunteer.id ? (
+              <ActivityIndicator size="small" color={colors.status.error} />
+            ) : (
+              <>
+                <MaterialCommunityIcons name="close" size={20} color={colors.status.error} />
+                <Text style={[styles.actionButtonText, { color: colors.status.error }]}>Reject</Text>
+              </>
+            )}
+          </Pressable>
+          <Pressable
+            style={({ pressed }) => [
+              styles.actionButton, 
+              styles.approveButton,
+              { 
+                opacity: (pressed || processingId === volunteer.id) ? 0.5 : 1,
+                disabled: processingId === volunteer.id
+              }
+            ]}
+            onPress={() => {
+              if (processingId === volunteer.id) return;
+              console.log('[BUTTON] Approve button pressed for:', volunteer.fullName, 'ID:', volunteer.id);
+              handleApprove(volunteer);
+            }}
+            disabled={processingId === volunteer.id}
+            accessibilityRole="button"
+            accessibilityLabel={`Approve ${volunteer.fullName}`}
+            importantForAccessibility="yes"
           >
-            <MaterialCommunityIcons name="check" size={20} color={colors.neutral.white} />
-            <Text style={[styles.actionButtonText, { color: colors.neutral.white }]}>Approve</Text>
-          </TouchableOpacity>
+            {processingId === volunteer.id ? (
+              <ActivityIndicator size="small" color={colors.neutral.white} />
+            ) : (
+              <>
+                <MaterialCommunityIcons name="check" size={20} color={colors.neutral.white} />
+                <Text style={[styles.actionButtonText, { color: colors.neutral.white }]}>Approve</Text>
+              </>
+            )}
+          </Pressable>
         </View>
       )}
     </View>

@@ -14,8 +14,8 @@ import {
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { colors, typography, spacing, borderRadius, shadows } from '../../theme';
-import { db, getUsersByRole, USER_ROLES, getPendingVolunteers } from '../../config/firebase';
-import { collection, query, where, getDocs, orderBy, limit, Timestamp } from 'firebase/firestore';
+import { BACKEND_URL as API_BASE } from '../../config/backend';
+import { logout } from '../../services/authService';
 
 const { width } = Dimensions.get('window');
 const cardWidth = (width - spacing.md * 3) / 2;
@@ -66,94 +66,56 @@ const AdminHomeScreen = ({ navigation }) => {
         console.log('Could not load admin profile:', err);
       }
 
-      // Try to load actual stats from Firebase
-      let firebaseStats = { ...DEFAULT_STATS };
-      
+      // Load token for API calls
+      const token = await AsyncStorage.getItem('userToken');
+      if (!token) {
+        navigation.replace('Login');
+        return;
+      }
+
+      // Fetch stats from Node.js backend
       try {
-        // Get total seniors count
-        const seniors = await getUsersByRole(USER_ROLES.ELDERLY);
-        if (seniors && seniors.length > 0) {
-          firebaseStats.totalSeniors = seniors.length;
-        }
-
-        // Get active volunteers/caregivers count
-        const volunteers = await getUsersByRole(USER_ROLES.VOLUNTEER);
-        const activeVolunteers = volunteers?.filter(v => v.status === 'approved') || [];
-        if (activeVolunteers.length > 0) {
-          firebaseStats.activeCaregivers = activeVolunteers.length;
-        }
-
-        // Get pending volunteer requests
-        const pendingVolunteers = await getPendingVolunteers();
-        if (pendingVolunteers) {
-          firebaseStats.pendingRequests = pendingVolunteers.length;
-        }
-
-        // Get SOS alerts from Firebase
-        try {
-          const sosRef = collection(db, 'sos_alerts');
-          const sosQuery = query(
-            sosRef, 
-            where('status', '==', 'active'),
-            limit(50)
-          );
-          const sosSnapshot = await getDocs(sosQuery);
-          firebaseStats.sosAlerts = sosSnapshot.size;
-        } catch (sosError) {
-          console.log('SOS collection not available:', sosError.message);
-        }
-
-        // Get resolved help requests
-        try {
-          const helpRef = collection(db, 'help_requests');
-          const resolvedQuery = query(
-            helpRef, 
-            where('status', '==', 'resolved'),
-            limit(500)
-          );
-          const resolvedSnapshot = await getDocs(resolvedQuery);
-          if (resolvedSnapshot.size > 0) {
-            firebaseStats.helpResolved = resolvedSnapshot.size;
+        const response = await fetch(`${API_BASE}/admin/stats`, {
+          headers: {
+            'Authorization': `Bearer ${token}`
           }
-        } catch (helpError) {
-          console.log('Help requests collection not available:', helpError.message);
-        }
-      } catch (fbError) {
-        console.log('Firebase stats not fully available:', fbError.message);
-      }
-
-      setStats(firebaseStats);
-
-      // Try to load recent activity from Firebase
-      let firebaseActivity = [];
-      try {
-        const activityRef = collection(db, 'activity_logs');
-        const activityQuery = query(
-          activityRef,
-          orderBy('createdAt', 'desc'),
-          limit(10)
-        );
-        const activitySnapshot = await getDocs(activityQuery);
-        
-        firebaseActivity = activitySnapshot.docs.map(doc => {
-          const data = doc.data();
-          const createdAt = data.createdAt?.toDate?.() || new Date();
-          return {
-            id: doc.id,
-            type: data.type || 'info',
-            message: data.message || 'Activity logged',
-            time: formatTimeAgo(createdAt),
-          };
         });
-      } catch (actError) {
-        console.log('Activity logs not available:', actError.message);
+
+        if (response.status === 401) {
+          await logout();
+          navigation.replace('Login');
+          return;
+        }
+
+        if (response.ok) {
+          const data = await response.json();
+          if (data.stats) {
+            setStats(data.stats);
+          }
+        }
+      } catch (apiError) {
+        console.log('Failed to fetch stats from backend:', apiError.message);
       }
 
-      // Use Firebase activity if available, otherwise use defaults
-      if (firebaseActivity.length > 0) {
-        setRecentActivity(firebaseActivity);
-      } else {
-        setRecentActivity(DEFAULT_ACTIVITY);
+      // Fetch recent activity from backend
+      try {
+        const response = await fetch(`${API_BASE}/admin/activity`, {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          if (data.activities && data.activities.length > 0) {
+            setRecentActivity(data.activities.map(a => ({
+              ...a,
+              time: formatTimeAgo(new Date(a.time))
+            })));
+          }
+        }
+      } catch (apiError) {
+        console.log('Failed to fetch activity from backend:', apiError.message);
       }
 
     } catch (error) {

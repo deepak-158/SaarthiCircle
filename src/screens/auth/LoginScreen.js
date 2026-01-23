@@ -1,4 +1,3 @@
-// Login Screen with Phone Number + OTP Authentication
 import React, { useState } from 'react';
 import {
   View,
@@ -17,43 +16,61 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { colors, typography, spacing } from '../../theme';
-import {
-  getUserByPhone,
-  isAdminPhone,
-  USER_ROLES,
-  ensureAdminExists,
-} from '../../config/firebase';
-
-// Sample OTP for testing (in production, use real SMS service)
-const SAMPLE_OTP = '123456';
+import { BACKEND_URL } from '../../config/backend';
+import { login as authLogin } from '../../services/authService';
 
 const LoginScreen = ({ navigation }) => {
-  const [phoneNumber, setPhoneNumber] = useState('');
+  const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('');
   const [otp, setOtp] = useState('');
   const [showOtpInput, setShowOtpInput] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [step, setStep] = useState('credentials');
 
   const formatPhoneNumber = (text) => {
     const cleaned = text.replace(/\D/g, '');
     return cleaned.slice(0, 10);
   };
 
+  const validateEmail = (email) => {
+    const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return re.test(email);
+  };
+
   const handleSendOtp = async () => {
-    if (phoneNumber.length !== 10) {
-      Alert.alert('Invalid Number', 'Please enter a valid 10-digit mobile number');
+    if (!email.trim() || !validateEmail(email)) {
+      Alert.alert('Invalid Email', 'Please enter a valid email address');
+      return;
+    }
+
+    if (phone.length !== 10) {
+      Alert.alert('Invalid Phone', 'Please enter a valid 10-digit phone number');
       return;
     }
 
     setLoading(true);
     try {
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      const response = await fetch(`${BACKEND_URL}/auth/send-otp`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: email.trim(),
+          phone: `+91${phone}`,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        Alert.alert('Error', data.message || 'Failed to send OTP');
+        return;
+      }
+
       setShowOtpInput(true);
-      Alert.alert(
-        'OTP Sent!', 
-        `Demo OTP: ${SAMPLE_OTP}\n\nIn production, OTP will be sent via SMS.`,
-        [{ text: 'OK' }]
-      );
+      setStep('otp');
+      Alert.alert('OTP Sent', `OTP has been sent to ${email}`, [{ text: 'OK' }]);
     } catch (error) {
+      console.error('Send OTP error:', error);
       Alert.alert('Error', 'Failed to send OTP. Please try again.');
     } finally {
       setLoading(false);
@@ -66,114 +83,62 @@ const LoginScreen = ({ navigation }) => {
       return;
     }
 
-    if (otp !== SAMPLE_OTP) {
-      Alert.alert('Wrong OTP', 'The OTP you entered is incorrect. Try: 123456');
+    setLoading(true);
+    try {
+      const response = await fetch(`${BACKEND_URL}/auth/verify-otp`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: email.trim(),
+          phone: `+91${phone}`,
+          token: otp,
+        }),
+      });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      Alert.alert('Error', data.message || 'Invalid OTP');
       return;
     }
 
-    setLoading(true);
-    try {
-      const fullPhoneNumber = '+91' + phoneNumber;
-      
-      // Check if admin phone
-      if (isAdminPhone(fullPhoneNumber)) {
-        // Ensure admin is registered in Firebase
-        const adminProfile = await ensureAdminExists(fullPhoneNumber);
-        
-        const profileToSave = adminProfile || {
-          uid: `admin_${phoneNumber}`,
-          phone: fullPhoneNumber,
-          role: USER_ROLES.ADMIN,
-          isApproved: true,
-          isActive: true,
-          fullName: 'Admin',
-        };
-        
-        await saveUserSession(profileToSave, USER_ROLES.ADMIN);
+    if (data.access_token) {
+      const role = data.user?.role;
+      await authLogin(data.access_token, role || 'user', data.user || {});
+
+      // If user has no role, redirect to Register screen
+      if (!role) {
         navigation.reset({
           index: 0,
-          routes: [{ name: 'AdminApp' }],
+          routes: [{ 
+            name: 'Register', 
+            params: { 
+              email: email.trim(), 
+              phone: `+91${phone}`, 
+              token: data.access_token 
+            } 
+          }],
         });
-        return;
+      } else {
+        if (role === 'admin') {
+          navigation.reset({ index: 0, routes: [{ name: 'AdminApp' }] });
+        } else if (role === 'volunteer') {
+          navigation.reset({ index: 0, routes: [{ name: 'CaregiverApp' }] });
+        } else if (role === 'volunteer_pending') {
+          navigation.reset({ index: 0, routes: [{ name: 'VolunteerPending' }] });
+        } else if (role === 'elderly') {
+          navigation.reset({ index: 0, routes: [{ name: 'ElderlyApp' }] });
+        } else {
+          // Default fallback
+          navigation.reset({ index: 0, routes: [{ name: 'Auth' }] });
+        }
       }
-
-      // Check if user exists in database
-      const userProfile = await getUserByPhone(fullPhoneNumber);
-      
-      if (!userProfile) {
-        // New user - need to register
-        Alert.alert(
-          'Welcome!',
-          'You are new here. Please register to continue.',
-          [
-            {
-              text: 'Register as Senior',
-              onPress: () => navigation.navigate('Register', { 
-                phone: fullPhoneNumber,
-                role: USER_ROLES.ELDERLY 
-              }),
-            },
-            {
-              text: 'Register as Volunteer',
-              onPress: () => navigation.navigate('Register', { 
-                phone: fullPhoneNumber,
-                role: USER_ROLES.VOLUNTEER 
-              }),
-            },
-            { text: 'Cancel', style: 'cancel' },
-          ]
-        );
-        return;
-      }
-
-      // Existing user - check role and approval status
-      if (userProfile.role === USER_ROLES.VOLUNTEER && !userProfile.isApproved) {
-        Alert.alert(
-          'Pending Approval',
-          'Your volunteer registration is pending admin approval. Please wait for approval.',
-          [{ text: 'OK' }]
-        );
-        return;
-      }
-
-      if (!userProfile.isActive) {
-        Alert.alert(
-          'Account Inactive',
-          'Your account has been deactivated. Please contact support.',
-          [{ text: 'OK' }]
-        );
-        return;
-      }
-
-      await saveUserSession(userProfile, userProfile.role);
-      navigateByRole(userProfile.role);
-
+    }
     } catch (error) {
-      console.error('Login error:', error);
-      Alert.alert('Error', 'Failed to login. Please try again.');
+      console.error('Verify OTP error:', error);
+      Alert.alert('Error', 'Failed to verify OTP. Please try again.');
     } finally {
       setLoading(false);
-    }
-  };
-
-  const saveUserSession = async (profile, role) => {
-    await AsyncStorage.setItem('userToken', profile.uid || profile.id);
-    await AsyncStorage.setItem('userRole', role);
-    await AsyncStorage.setItem('userProfile', JSON.stringify(profile));
-  };
-
-  const navigateByRole = (role) => {
-    switch (role) {
-      case USER_ROLES.ADMIN:
-        navigation.reset({ index: 0, routes: [{ name: 'AdminApp' }] });
-        break;
-      case USER_ROLES.VOLUNTEER:
-        navigation.reset({ index: 0, routes: [{ name: 'CaregiverApp' }] });
-        break;
-      case USER_ROLES.ELDERLY:
-      default:
-        navigation.reset({ index: 0, routes: [{ name: 'ElderlyApp' }] });
-        break;
     }
   };
 
@@ -181,15 +146,25 @@ const LoginScreen = ({ navigation }) => {
     setLoading(true);
     try {
       const demoProfile = {
-        uid: `demo_${role}_${Date.now()}`,
-        phone: '+919999999999',
-        displayName: role === USER_ROLES.ADMIN ? 'Admin' : role === USER_ROLES.VOLUNTEER ? 'Volunteer' : 'Senior',
-        role,
-        isApproved: true,
-        isActive: true,
+        token: `demo_${role}_${Date.now()}`,
+        user: {
+          id: `demo_${role}_${Date.now()}`,
+          email: `demo_${role}@saathicircle.com`,
+          phone: '+919999999999',
+          displayName: role === 'admin' ? 'Admin' : role === 'volunteer' ? 'Volunteer' : 'Senior',
+          role,
+        },
       };
-      await saveUserSession(demoProfile, role);
-      navigateByRole(role);
+      
+      await authLogin(demoProfile.token, role, demoProfile.user);
+
+      if (role === 'admin') {
+        navigation.reset({ index: 0, routes: [{ name: 'AdminApp' }] });
+      } else if (role === 'volunteer') {
+        navigation.reset({ index: 0, routes: [{ name: 'CaregiverApp' }] });
+      } else if (role === 'elderly') {
+        navigation.reset({ index: 0, routes: [{ name: 'ElderlyApp' }] });
+      }
     } catch (error) {
       Alert.alert('Error', 'Demo login failed');
     } finally {
@@ -211,7 +186,6 @@ const LoginScreen = ({ navigation }) => {
             contentContainerStyle={styles.scrollContent}
             keyboardShouldPersistTaps="handled"
           >
-            {/* Logo */}
             <View style={styles.logoContainer}>
               <View style={styles.logoCircle}>
                 <MaterialCommunityIcons name="hand-heart" size={60} color={colors.primary.main} />
@@ -221,30 +195,50 @@ const LoginScreen = ({ navigation }) => {
               <Text style={styles.subtitle}>Companionship for Seniors</Text>
             </View>
 
-            {/* Phone/OTP Input */}
             <View style={styles.inputContainer}>
               {!showOtpInput ? (
                 <>
-                  <Text style={styles.inputLabel}>Enter Mobile Number</Text>
-                  <View style={styles.phoneInputRow}>
-                    <View style={styles.countryCode}>
-                      <Text style={styles.countryCodeText}>+91</Text>
-                    </View>
+                  <Text style={styles.inputLabel}>Login / Register</Text>
+                  
+                  <View style={styles.inputGroup}>
+                    <Text style={styles.fieldLabel}>Email Address</Text>
                     <TextInput
-                      style={styles.phoneInput}
-                      placeholder="10-digit mobile number"
+                      style={styles.input}
+                      placeholder="your@email.com"
                       placeholderTextColor={colors.neutral.gray}
-                      keyboardType="phone-pad"
-                      maxLength={10}
-                      value={phoneNumber}
-                      onChangeText={(text) => setPhoneNumber(formatPhoneNumber(text))}
+                      keyboardType="email-address"
+                      value={email}
+                      onChangeText={setEmail}
+                      editable={!loading}
                     />
+                  </View>
+
+                  <View style={styles.inputGroup}>
+                    <Text style={styles.fieldLabel}>Phone Number</Text>
+                    <View style={styles.phoneInputRow}>
+                      <View style={styles.countryCode}>
+                        <Text style={styles.countryCodeText}>+91</Text>
+                      </View>
+                      <TextInput
+                        style={styles.phoneInput}
+                        placeholder="10-digit number"
+                        placeholderTextColor={colors.neutral.gray}
+                        keyboardType="phone-pad"
+                        maxLength={10}
+                        value={phone}
+                        onChangeText={(text) => setPhone(formatPhoneNumber(text))}
+                        editable={!loading}
+                      />
+                    </View>
                   </View>
                   
                   <TouchableOpacity
-                    style={[styles.primaryButton, phoneNumber.length !== 10 && styles.buttonDisabled]}
+                    style={[
+                      styles.primaryButton,
+                      (!email || !validateEmail(email) || phone.length !== 10) && styles.buttonDisabled
+                    ]}
                     onPress={handleSendOtp}
-                    disabled={loading || phoneNumber.length !== 10}
+                    disabled={loading || !email || !validateEmail(email) || phone.length !== 10}
                   >
                     {loading ? (
                       <ActivityIndicator color={colors.neutral.white} size="small" />
@@ -256,7 +250,7 @@ const LoginScreen = ({ navigation }) => {
               ) : (
                 <>
                   <Text style={styles.inputLabel}>Enter OTP</Text>
-                  <Text style={styles.otpSentText}>OTP sent to +91 {phoneNumber}</Text>
+                  <Text style={styles.otpSentText}>OTP sent to {email}</Text>
                   
                   <TextInput
                     style={styles.otpInput}
@@ -266,9 +260,8 @@ const LoginScreen = ({ navigation }) => {
                     maxLength={6}
                     value={otp}
                     onChangeText={(text) => setOtp(text.replace(/\D/g, ''))}
+                    editable={!loading}
                   />
-
-                  <Text style={styles.demoOtpHint}>Demo OTP: 123456</Text>
                   
                   <TouchableOpacity
                     style={[styles.primaryButton, otp.length !== 6 && styles.buttonDisabled]}
@@ -278,7 +271,7 @@ const LoginScreen = ({ navigation }) => {
                     {loading ? (
                       <ActivityIndicator color={colors.neutral.white} size="small" />
                     ) : (
-                      <Text style={styles.primaryButtonText}>Verify & Login</Text>
+                      <Text style={styles.primaryButtonText}>Verify & Continue</Text>
                     )}
                   </TouchableOpacity>
 
@@ -287,20 +280,28 @@ const LoginScreen = ({ navigation }) => {
                       <Text style={styles.linkText}>Resend OTP</Text>
                     </TouchableOpacity>
                     <TouchableOpacity onPress={() => { setShowOtpInput(false); setOtp(''); }}>
-                      <Text style={styles.linkText}>Change Number</Text>
+                      <Text style={styles.linkText}>Change Email/Phone</Text>
                     </TouchableOpacity>
                   </View>
                 </>
               )}
+
+              <TouchableOpacity 
+                style={styles.registerLink} 
+                onPress={() => navigation.navigate('Register')}
+              >
+                <Text style={styles.registerLinkText}>
+                  Don't have an account? <Text style={styles.registerLinkHighlight}>Register</Text>
+                </Text>
+              </TouchableOpacity>
             </View>
 
-            {/* Demo Mode */}
             <View style={styles.demoSection}>
               <Text style={styles.orText}>─────  or try demo mode  ─────</Text>
               <View style={styles.demoButtons}>
                 <TouchableOpacity
                   style={[styles.demoButton, { backgroundColor: colors.primary.main }]}
-                  onPress={() => handleDemoLogin(USER_ROLES.ELDERLY)}
+                  onPress={() => handleDemoLogin('elderly')}
                   disabled={loading}
                 >
                   <MaterialCommunityIcons name="account" size={24} color={colors.neutral.white} />
@@ -309,7 +310,7 @@ const LoginScreen = ({ navigation }) => {
 
                 <TouchableOpacity
                   style={[styles.demoButton, { backgroundColor: '#4CAF50' }]}
-                  onPress={() => handleDemoLogin(USER_ROLES.VOLUNTEER)}
+                  onPress={() => handleDemoLogin('volunteer')}
                   disabled={loading}
                 >
                   <MaterialCommunityIcons name="hand-heart" size={24} color={colors.neutral.white} />
@@ -318,7 +319,7 @@ const LoginScreen = ({ navigation }) => {
 
                 <TouchableOpacity
                   style={[styles.demoButton, { backgroundColor: '#FF6B35' }]}
-                  onPress={() => handleDemoLogin(USER_ROLES.ADMIN)}
+                  onPress={() => handleDemoLogin('admin')}
                   disabled={loading}
                 >
                   <MaterialCommunityIcons name="shield-account" size={24} color={colors.neutral.white} />
@@ -359,6 +360,13 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1, shadowRadius: 4, elevation: 4,
   },
   inputLabel: { fontSize: 18, fontWeight: '600', color: colors.neutral.black, marginBottom: spacing.md, textAlign: 'center' },
+  inputGroup: { marginBottom: spacing.md },
+  fieldLabel: { fontSize: 14, fontWeight: '500', color: colors.neutral.darkGray, marginBottom: spacing.xs },
+  input: {
+    backgroundColor: colors.neutral.lightGray, borderRadius: 12,
+    paddingHorizontal: spacing.md, paddingVertical: spacing.md,
+    fontSize: 16, color: colors.neutral.black,
+  },
   phoneInputRow: { flexDirection: 'row', marginBottom: spacing.md },
   countryCode: {
     backgroundColor: colors.neutral.lightGray, paddingHorizontal: spacing.md,
@@ -368,7 +376,7 @@ const styles = StyleSheet.create({
   phoneInput: {
     flex: 1, backgroundColor: colors.neutral.lightGray, borderRadius: 12,
     paddingHorizontal: spacing.md, paddingVertical: spacing.md,
-    fontSize: 18, color: colors.neutral.black,
+    fontSize: 16, color: colors.neutral.black,
   },
   otpInput: {
     backgroundColor: colors.neutral.lightGray, borderRadius: 12,
@@ -377,12 +385,14 @@ const styles = StyleSheet.create({
     letterSpacing: 8, marginBottom: spacing.sm,
   },
   otpSentText: { fontSize: 14, color: colors.neutral.gray, textAlign: 'center', marginBottom: spacing.md },
-  demoOtpHint: { fontSize: 12, color: '#4CAF50', textAlign: 'center', marginBottom: spacing.md, fontStyle: 'italic' },
   primaryButton: { backgroundColor: colors.primary.main, borderRadius: 12, paddingVertical: spacing.md, alignItems: 'center', marginTop: spacing.sm },
   buttonDisabled: { backgroundColor: colors.neutral.gray, opacity: 0.6 },
   primaryButtonText: { color: colors.neutral.white, fontSize: 18, fontWeight: '600' },
   otpActions: { flexDirection: 'row', justifyContent: 'space-between', marginTop: spacing.md },
   linkText: { color: colors.primary.main, fontSize: 14, fontWeight: '500' },
+  registerLink: { marginTop: spacing.lg, alignItems: 'center' },
+  registerLinkText: { fontSize: 14, color: colors.neutral.darkGray },
+  registerLinkHighlight: { color: colors.primary.main, fontWeight: '600' },
   demoSection: { marginTop: spacing.xl },
   orText: { color: colors.neutral.gray, textAlign: 'center', marginBottom: spacing.md, fontSize: 14 },
   demoButtons: { flexDirection: 'row', justifyContent: 'space-between', gap: spacing.sm },

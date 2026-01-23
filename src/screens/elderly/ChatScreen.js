@@ -16,6 +16,9 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { LargeButton, VoiceButton } from '../../components/common';
 import { colors, typography, spacing, borderRadius, shadows } from '../../theme';
 import { getTranslation } from '../../i18n/translations';
+import { BACKEND_URL } from '../../config/backend';
+import socketService, { getSocket, joinSession, sendMessage as socketSendMessage } from '../../services/socketService';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const conversationPrompts = [
   { id: 1, text: 'Talk about childhood memories', icon: 'memory' },
@@ -25,26 +28,77 @@ const conversationPrompts = [
 ];
 
 const ChatScreen = ({ navigation, route }) => {
-  const { mode = 'text', companion } = route.params || {};
+  const { mode = 'text', companion, conversationId } = route.params || {};
   const [language] = useState('en');
   const t = getTranslation(language);
   
-  const [messages, setMessages] = useState([
-    {
-      id: 1,
-      text: 'Hello! It\'s so nice to meet you. How are you feeling today?',
-      sender: 'companion',
-      timestamp: new Date(),
-    },
-  ]);
+  const [messages, setMessages] = useState([]);
   const [inputText, setInputText] = useState('');
   const [isCallActive, setIsCallActive] = useState(mode === 'voice');
   const [callDuration, setCallDuration] = useState(0);
   const [isListening, setIsListening] = useState(false);
+  const [currentUserId, setCurrentUserId] = useState(null);
   
   const scrollViewRef = useRef();
   const callTimerRef = useRef(null);
   const pulseAnim = useRef(new Animated.Value(1)).current;
+
+  // Initialize socket listeners and fetch history
+  useEffect(() => {
+    let mounted = true;
+    const socket = getSocket();
+
+    // load current user id once
+    (async () => {
+      try {
+        const profileJson = await AsyncStorage.getItem('userProfile');
+        const profile = profileJson ? JSON.parse(profileJson) : null;
+        const uid = profile?.id || profile?.uid || profile?.userId;
+        if (mounted) setCurrentUserId(uid);
+      } catch {}
+    })();
+
+    if (conversationId) {
+      joinSession({ conversationId });
+      // fetch existing messages
+      (async () => {
+        try {
+          const res = await fetch(`${BACKEND_URL}/conversations/${conversationId}/messages`);
+          const json = await res.json();
+          if (mounted && Array.isArray(json.messages)) {
+            const normalized = json.messages.map(m => ({
+              id: m.id || `${m.sender_id}-${m.sent_at}`,
+              text: m.content,
+              sender: currentUserId && m.sender_id === currentUserId ? 'user' : 'companion',
+              timestamp: new Date(m.sent_at || Date.now()),
+            }));
+            setMessages(normalized);
+          }
+        } catch (e) {
+          // no-op display fallback
+        }
+      })();
+    }
+
+    socket.off('message:new');
+    socket.on('message:new', (m) => {
+      if (!mounted) return;
+      setMessages((prev) => ([
+        ...prev,
+        {
+          id: m.id || `${m.sender_id}-${m.sent_at}`,
+          text: m.content,
+          sender: currentUserId && m.sender_id === currentUserId ? 'user' : 'companion',
+          timestamp: new Date(m.sent_at || Date.now()),
+        },
+      ]));
+    });
+
+    return () => {
+      mounted = false;
+      socket.off('message:new');
+    };
+  }, [conversationId, companion?.id, currentUserId]);
 
   useEffect(() => {
     if (isCallActive) {
@@ -86,26 +140,19 @@ const ChatScreen = ({ navigation, route }) => {
   const handleSendMessage = () => {
     if (!inputText.trim()) return;
 
-    const newMessage = {
-      id: messages.length + 1,
+    const optimistic = {
+      id: `local-${Date.now()}`,
       text: inputText,
       sender: 'user',
       timestamp: new Date(),
     };
-
-    setMessages((prev) => [...prev, newMessage]);
+    setMessages((prev) => [...prev, optimistic]);
+    const toSend = inputText;
     setInputText('');
 
-    // Simulate companion response
-    setTimeout(() => {
-      const response = {
-        id: messages.length + 2,
-        text: 'That\'s wonderful to hear! Please tell me more about it.',
-        sender: 'companion',
-        timestamp: new Date(),
-      };
-      setMessages((prev) => [...prev, response]);
-    }, 2000);
+    if (conversationId) {
+      socketSendMessage({ conversationId, senderId: currentUserId || 'USER', content: toSend, type: 'text' });
+    }
   };
 
   const handlePromptSelect = (prompt) => {

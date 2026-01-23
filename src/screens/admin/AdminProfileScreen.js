@@ -12,13 +12,14 @@ import {
   ActivityIndicator,
   Switch,
   Modal,
+  Platform,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { colors, typography, spacing, borderRadius, shadows } from '../../theme';
-import { db } from '../../config/firebase';
-import { doc, updateDoc } from 'firebase/firestore';
+import { logout } from '../../services/authService';
+import { BACKEND_URL as API_BASE } from '../../config/backend';
 
 // Default admin profile
 const DEFAULT_ADMIN = {
@@ -73,12 +74,39 @@ const AdminProfileScreen = ({ navigation }) => {
   const loadProfile = async () => {
     try {
       setLoading(true);
+      const token = await AsyncStorage.getItem('userToken');
+      
+      // Try fetching fresh profile from backend
+      try {
+        const resp = await fetch(`${API_BASE}/me`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+
+        if (resp.status === 401) {
+          await logout();
+          return;
+        }
+
+        if (resp.ok) {
+          const data = await resp.json();
+          if (data.user) {
+            setProfile({ ...DEFAULT_ADMIN, ...data.user, fullName: data.user.name || data.user.full_name || DEFAULT_ADMIN.fullName });
+            await AsyncStorage.setItem('userProfile', JSON.stringify(data.user));
+            setLoading(false);
+            return;
+          }
+        }
+      } catch (e) {
+        console.warn('Failed to fetch profile from backend:', e);
+      }
+
       const profileJson = await AsyncStorage.getItem('userProfile');
       if (profileJson) {
         const storedProfile = JSON.parse(profileJson);
         setProfile({
           ...DEFAULT_ADMIN,
           ...storedProfile,
+          fullName: storedProfile.name || storedProfile.full_name || DEFAULT_ADMIN.fullName
         });
       }
     } catch (error) {
@@ -106,25 +134,39 @@ const AdminProfileScreen = ({ navigation }) => {
 
     setSaving(true);
     try {
-      // Update in Firestore if has ID
-      if (profile.id) {
-        const userRef = doc(db, 'users', profile.id);
-        await updateDoc(userRef, {
-          ...editedProfile,
-          updatedAt: new Date().toISOString(),
-        });
+      const token = await AsyncStorage.getItem('userToken');
+      const resp = await fetch(`${API_BASE}/profile`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          full_name: editedProfile.fullName,
+          phone: editedProfile.phone,
+          // other fields
+        }),
+      });
+
+      if (resp.status === 401) {
+        Alert.alert('Session Expired', 'Your session has expired. Please login again.');
+        await logout();
+        return;
       }
+      
+      const result = await resp.json();
+      if (!resp.ok) throw new Error(result?.error || 'Failed to update profile');
 
       // Update local storage
-      const updatedProfile = { ...profile, ...editedProfile };
+      const updatedProfile = { ...profile, ...result.profile };
       await AsyncStorage.setItem('userProfile', JSON.stringify(updatedProfile));
-      setProfile(updatedProfile);
+      setProfile({ ...updatedProfile, fullName: updatedProfile.name || updatedProfile.full_name });
       setEditMode(false);
       
       Alert.alert('Success', 'Profile updated successfully!');
     } catch (error) {
       console.error('Error saving profile:', error);
-      Alert.alert('Error', 'Failed to save profile. Please try again.');
+      Alert.alert('Error', error.message || 'Failed to save profile. Please try again.');
     } finally {
       setSaving(false);
     }
@@ -157,6 +199,13 @@ const AdminProfileScreen = ({ navigation }) => {
   };
 
   const handleLogout = async () => {
+    if (Platform.OS === 'web') {
+      if (window.confirm('Are you sure you want to logout?')) {
+        await logout();
+      }
+      return;
+    }
+
     Alert.alert(
       'Logout',
       'Are you sure you want to logout?',
@@ -166,11 +215,7 @@ const AdminProfileScreen = ({ navigation }) => {
           text: 'Logout',
           style: 'destructive',
           onPress: async () => {
-            await AsyncStorage.multiRemove(['userToken', 'userRole', 'userProfile']);
-            navigation.reset({
-              index: 0,
-              routes: [{ name: 'Auth' }],
-            });
+            await logout();
           },
         },
       ]

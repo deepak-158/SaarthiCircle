@@ -15,6 +15,8 @@ import {
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { LargeButton, AccessibleInput } from '../../components/common';
 import { colors, typography, spacing, borderRadius, shadows } from '../../theme';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { BACKEND_URL as API_BASE } from '../../config/backend';
 
 const CaregiverInteractionScreen = ({ navigation, route }) => {
   const { requestId, request } = route.params || {};
@@ -24,14 +26,14 @@ const CaregiverInteractionScreen = ({ navigation, route }) => {
 
   // Use actual request data if available, otherwise use default
   const seniorDetails = request ? {
-    name: request.seniorName || 'Senior',
-    age: request.seniorAge || 'N/A',
-    phone: request.seniorPhone || '+91 98765 43210',
-    address: request.seniorAddress || request.address || '123, Green Park, New Delhi',
-    emergencyContact: request.emergencyContact || '+91 87654 32109',
+    name: request.seniorName || request.senior?.name || 'Senior',
+    age: request.senior?.age || 'N/A',
+    phone: request.senior?.phone || '+91 98765 43210',
+    address: request.senior?.address || request.address || '123, Green Park, New Delhi',
+    emergencyContact: request.senior?.emergencyContact || '+91 87654 32109',
     helpType: request.helpType || request.category || 'Help Request',
     description: request.description || request.message || 'Needs assistance',
-    medicalInfo: request.medicalInfo || 'Not provided',
+    medicalInfo: request.senior?.medicalInfo || 'Not provided',
   } : {
     name: 'Sharma Ji',
     age: 72,
@@ -145,7 +147,7 @@ const CaregiverInteractionScreen = ({ navigation, route }) => {
     );
   };
 
-  const handleMarkResolved = () => {
+  const handleMarkResolved = async () => {
     Alert.alert(
       'Mark as Resolved',
       'Are you sure you want to mark this request as resolved?',
@@ -153,9 +155,22 @@ const CaregiverInteractionScreen = ({ navigation, route }) => {
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Yes, Resolve',
-          onPress: () => {
-            Alert.alert('Success', 'Request marked as resolved!');
-            navigation.goBack();
+          onPress: async () => {
+            try {
+              if (requestId && !requestId.toString().startsWith('dummy')) {
+                const token = await AsyncStorage.getItem('userToken');
+                const resp = await fetch(`${API_BASE}/help-requests/${requestId}/complete`, {
+                  method: 'PUT',
+                  headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (!resp.ok) throw new Error('Failed to resolve request');
+              }
+              Alert.alert('Success', 'Request marked as resolved!');
+              navigation.goBack();
+            } catch (error) {
+              console.error('Resolve error:', error);
+              Alert.alert('Error', 'Failed to resolve request. Please try again.');
+            }
           }
         }
       ]
