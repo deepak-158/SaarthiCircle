@@ -7,6 +7,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AuthNavigator, ElderlyNavigator, CaregiverNavigator, AdminNavigator } from './src/navigation';
 import { SplashScreen } from './src/screens/auth';
 import { subscribeToAuthChanges, checkAuth, logout } from './src/services/authService';
+import { ChatProvider } from './src/context/ChatContext';
 
 import { colors } from './src/theme';
 
@@ -49,34 +50,36 @@ const App = () => {
   }, []);
 
   return (
-    <View style={{ flex: 1 }}>
-      <StatusBar 
-        barStyle="dark-content" 
-        backgroundColor={colors.neutral.white}
-      />
-      <NavigationContainer>
-        <RootStack.Navigator
-          initialRouteName="Auth"
-          screenOptions={{
-            headerShown: false,
-            animation: 'fade',
-          }}
-        >
-          <RootStack.Screen name="Splash" component={SplashScreen} />
-          
-          <RootStack.Screen 
-            name="Auth" 
-            component={AuthNavigator} 
-            initialParams={{ screen: 'Login' }}
-          />
-          
-          {/* Dashboard routes */}
-          <RootStack.Screen name="AdminApp" component={AdminNavigator} />
-          <RootStack.Screen name="CaregiverApp" component={CaregiverNavigator} />
-          <RootStack.Screen name="ElderlyApp" component={ElderlyNavigator} />
-        </RootStack.Navigator>
-      </NavigationContainer>
-    </View>
+    <ChatProvider>
+      <View style={{ flex: 1 }}>
+        <StatusBar 
+          barStyle="dark-content" 
+          backgroundColor={colors.neutral.white}
+        />
+        <NavigationContainer>
+          <RootStack.Navigator
+            initialRouteName="Auth"
+            screenOptions={{
+              headerShown: false,
+              animation: 'fade',
+            }}
+          >
+            <RootStack.Screen name="Splash" component={SplashScreen} />
+            
+            <RootStack.Screen 
+              name="Auth" 
+              component={AuthNavigator} 
+              initialParams={{ screen: 'Login' }}
+            />
+            
+            {/* Dashboard routes */}
+            <RootStack.Screen name="AdminApp" component={AdminNavigator} />
+            <RootStack.Screen name="CaregiverApp" component={CaregiverNavigator} />
+            <RootStack.Screen name="ElderlyApp" component={ElderlyNavigator} />
+          </RootStack.Navigator>
+        </NavigationContainer>
+      </View>
+    </ChatProvider>
   );
 };
 

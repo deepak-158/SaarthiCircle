@@ -24,7 +24,7 @@ const CaregiverNavigator = () => {
     >
       <Stack.Screen name="CaregiverDashboard" component={CaregiverDashboard} />
       <Stack.Screen name="VolunteerSession" component={VolunteerSessionScreen} />
-      <Stack.Screen name="VolunteerChat" component={ChatScreen} />
+      <Stack.Screen name="Chat" component={ChatScreen} />
       <Stack.Screen name="CaregiverInteraction" component={CaregiverInteractionScreen} />
       <Stack.Screen 
         name="SOSAlerts" 

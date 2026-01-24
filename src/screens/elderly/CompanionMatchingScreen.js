@@ -15,12 +15,13 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { LargeButton, LargeCard } from '../../components/common';
+import { LargeButton, LargeCard, ActiveChatOverlay } from '../../components/common';
 import { colors, typography, spacing, borderRadius, shadows } from '../../theme';
 import { getTranslation } from '../../i18n/translations';
 // Firebase imports removed
 import socketService, { getSocket, identify, requestCompanion } from '../../services/socketService';
 import { BACKEND_URL as API_BASE } from '../../config/backend';
+import { useChat } from '../../context/ChatContext';
 
 // Available companions (dummy + will be combined with real data)
 const dummyCompanions = [
@@ -74,6 +75,7 @@ const EMERGENCY_CONTACTS = {
 const CompanionMatchingScreen = ({ navigation }) => {
   const [language] = useState('en');
   const t = getTranslation(language);
+  const { startSession, setCallStatus, activeChats } = useChat();
   const [searching, setSearching] = useState(true);
   const [companion, setCompanion] = useState(null);
   const [allCompanions, setAllCompanions] = useState([]);
@@ -98,9 +100,11 @@ const CompanionMatchingScreen = ({ navigation }) => {
         socket.off('session:started');
         socket.on('session:started', ({ conversationId: cid, seniorId, volunteerId }) => {
           setConversationId(cid);
-          setCompanion((prev) => prev || { id: volunteerId, isReal: true });
+          const companionObj = { id: volunteerId, isReal: true };
+          setCompanion(companionObj);
           setSearching(false);
-          navigation.navigate('Chat', { mode: 'text', companion: { id: volunteerId, isReal: true }, conversationId: cid });
+          startSession({ conversationId: cid, companion: companionObj });
+          navigation.navigate('Chat', { mode: 'text', companion: companionObj, conversationId: cid });
         });
 
         socket.off('seeker:queued');
@@ -217,38 +221,59 @@ const CompanionMatchingScreen = ({ navigation }) => {
     }, 2000);
   };
 
-  const handleVoiceCall = () => {
-    if (companion?.phone) {
-      Alert.alert(
-        'Start Voice Call',
-        `Call ${companion.fullName || 'Companion'}?`,
-        [
-          { text: 'Cancel', style: 'cancel' },
-          { 
-            text: 'Call', 
-            onPress: () => {
-              // For real calls, use Linking
-              if (companion.isReal && companion.phone) {
-                Linking.openURL(`tel:${companion.phone.replace(/\s/g, '')}`);
-              } else {
-                // For demo, navigate to chat with voice mode
-                navigation.navigate('Chat', { mode: 'voice', companion });
-              }
-            }
-          },
-        ]
-      );
-    } else {
-      navigation.navigate('Chat', { mode: 'voice', companion });
+  const getOrCreateConversationId = async (selectedCompanion) => {
+    if (conversationId) return conversationId;
+
+    const comp = selectedCompanion || companion;
+    const cidFromState = conversationId;
+    if (cidFromState) return cidFromState;
+
+    const profileJson = await AsyncStorage.getItem('userProfile');
+    const profile = profileJson ? JSON.parse(profileJson) : null;
+    const seniorId = profile?.id || profile?.uid || profile?.userId;
+
+    const companionId = comp?.id;
+    if (!seniorId || !companionId) {
+      return `local-${Date.now()}`;
     }
+
+    const isLikelyReal = comp?.isReal && !String(companionId).startsWith('dummy');
+    if (!isLikelyReal) {
+      return `local-${seniorId}-${companionId}`;
+    }
+
+    const resp = await fetch(`${API_BASE}/conversations/find-or-create`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ seniorId, companionId }),
+    });
+    const data = await resp.json();
+    const newId = data?.conversation?.id;
+
+    if (!resp.ok || !newId) {
+      return `local-${seniorId}-${companionId}`;
+    }
+
+    setConversationId(newId);
+    return newId;
+  };
+
+  const handleVoiceCall = () => {
+    (async () => {
+      const cid = await getOrCreateConversationId(companion);
+      startSession({ conversationId: cid, companion });
+      setCallStatus(true);
+      navigation.navigate('Chat', { mode: 'voice', companion, conversationId: cid });
+    })();
   };
 
   const handleTextChat = () => {
-    if (conversationId && companion) {
-      navigation.navigate('Chat', { mode: 'text', companion, conversationId });
-    } else {
-      navigation.navigate('Chat', { mode: 'text', companion });
-    }
+    (async () => {
+      const cid = await getOrCreateConversationId(companion);
+      startSession({ conversationId: cid, companion });
+      setCallStatus(false);
+      navigation.navigate('Chat', { mode: 'text', companion, conversationId: cid });
+    })();
   };
 
   // Emergency SOS Handler
@@ -323,6 +348,9 @@ const CompanionMatchingScreen = ({ navigation }) => {
       style={styles.container}
     >
       <SafeAreaView style={styles.safeArea}>
+        {/* Active Chat Overlay */}
+        <ActiveChatOverlay navigation={navigation} activeChats={activeChats} />
+        
         {/* Emergency SOS Button - Always visible */}
         <TouchableOpacity 
           style={styles.sosButtonFloating}

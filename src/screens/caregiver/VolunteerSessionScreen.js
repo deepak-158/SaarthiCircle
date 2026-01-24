@@ -4,11 +4,15 @@ import { View, Text, SafeAreaView, StyleSheet, TouchableOpacity, ActivityIndicat
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { colors, spacing, typography, borderRadius, shadows } from '../../theme';
+import { ActiveChatOverlay } from '../../components/common';
+import { useChat } from '../../context/ChatContext';
 import socketService, { getSocket, identify } from '../../services/socketService';
 
 const VolunteerSessionScreen = ({ navigation }) => {
   const [isOnline, setIsOnline] = useState(false);
   const [userId, setUserId] = useState(null);
+  const [pendingSeniorId, setPendingSeniorId] = useState(null);
+  const { activeChats } = useChat();
   const pulseAnim = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
@@ -28,11 +32,24 @@ const VolunteerSessionScreen = ({ navigation }) => {
     socket.off('session:started');
     socket.on('session:started', ({ conversationId, seniorId, volunteerId }) => {
       if (!isOnline) return;
-      navigation.navigate('VolunteerChat', { mode: 'text', companion: { id: seniorId, isReal: true }, conversationId });
+      navigation.navigate('Chat', { mode: 'text', companion: { id: seniorId, isReal: true }, conversationId });
+    });
+
+    socket.off('seeker:incoming');
+    socket.on('seeker:incoming', ({ seniorId }) => {
+      if (!isOnline) return;
+      setPendingSeniorId((prev) => prev || seniorId);
+    });
+
+    socket.off('request:claimed');
+    socket.on('request:claimed', ({ seniorId }) => {
+      if (pendingSeniorId === seniorId) setPendingSeniorId(null);
     });
 
     return () => {
       socket.off('session:started');
+      socket.off('seeker:incoming');
+      socket.off('request:claimed');
     };
   }, [isOnline, navigation]);
 
@@ -57,8 +74,20 @@ const VolunteerSessionScreen = ({ navigation }) => {
     setIsOnline(false);
   };
 
+  const handleAccept = () => {
+    const socket = getSocket();
+    if (pendingSeniorId && userId) {
+      socket.emit('volunteer:accept', { seniorId: pendingSeniorId, volunteerId: userId });
+      // wait for session:started, clear local placeholder
+      setPendingSeniorId(null);
+    }
+  };
+
   return (
     <SafeAreaView style={styles.safeArea}>
+      {/* Active Chat Overlay */}
+      <ActiveChatOverlay navigation={navigation} activeChats={activeChats} />
+      
       <View style={styles.container}>
         <View style={styles.header}>
           <MaterialCommunityIcons name="account-heart" size={48} color={colors.primary.main} />
@@ -71,8 +100,16 @@ const VolunteerSessionScreen = ({ navigation }) => {
             <Animated.View style={[styles.statusIcon, { transform: [{ scale: pulseAnim }] }]}>
               <MaterialCommunityIcons name="radar" size={40} color={colors.primary.main} />
             </Animated.View>
-            <Text style={styles.statusText}>Waiting for a match...</Text>
+            <Text style={styles.statusText}>
+              {pendingSeniorId ? 'Incoming request...' : 'Waiting for a match...'}
+            </Text>
             <ActivityIndicator color={colors.primary.main} style={{ marginTop: spacing.md }} />
+            {pendingSeniorId && (
+              <TouchableOpacity style={styles.onlineBtn} onPress={handleAccept}>
+                <MaterialCommunityIcons name="check" size={24} color={colors.neutral.white} />
+                <Text style={styles.onlineBtnText}>Accept Request</Text>
+              </TouchableOpacity>
+            )}
             <TouchableOpacity style={[styles.offlineBtn]} onPress={handleGoOffline}>
               <MaterialCommunityIcons name="power" size={22} color={colors.neutral.white} />
               <Text style={styles.offlineBtnText}>Go Offline</Text>

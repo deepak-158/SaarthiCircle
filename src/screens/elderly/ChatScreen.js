@@ -19,6 +19,7 @@ import { getTranslation } from '../../i18n/translations';
 import { BACKEND_URL } from '../../config/backend';
 import socketService, { getSocket, joinSession, sendMessage as socketSendMessage } from '../../services/socketService';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useChat } from '../../context/ChatContext';
 
 const conversationPrompts = [
   { id: 1, text: 'Talk about childhood memories', icon: 'memory' },
@@ -28,7 +29,10 @@ const conversationPrompts = [
 ];
 
 const ChatScreen = ({ navigation, route }) => {
-  const { mode = 'text', companion, conversationId } = route.params || {};
+  const { mode = 'text', companion: routeCompanion, conversationId: routeConversationId } = route.params || {};
+  const { activeSession, setCallStatus, addActiveChat, updateActiveChatMessage, removeActiveChat } = useChat();
+  const companion = routeCompanion || activeSession?.companion;
+  const conversationId = routeConversationId || activeSession?.conversationId;
   const [language] = useState('en');
   const t = getTranslation(language);
   
@@ -43,12 +47,29 @@ const ChatScreen = ({ navigation, route }) => {
   const callTimerRef = useRef(null);
   const pulseAnim = useRef(new Animated.Value(1)).current;
 
-  // Initialize socket listeners and fetch history
+  const cacheKey = conversationId ? `chat:messages:${conversationId}` : null;
+
+  const normalizeMessage = (m) => {
+    const sentAt = m.sent_at || m.created_at || Date.now();
+    const senderId = m.sender_id || m.senderId;
+    const sender = companion?.id && senderId === companion.id ? 'companion' : 'user';
+    return {
+      id: m.id || `${senderId}-${sentAt}`,
+      text: m.content || m.text || '',
+      sender,
+      timestamp: new Date(sentAt),
+    };
+  };
+
+  // Register this chat as active when screen mounts
+  useEffect(() => {
+    if (companion && conversationId) {
+      addActiveChat(conversationId, companion);
+    }
+  }, [conversationId, companion]);
+
   useEffect(() => {
     let mounted = true;
-    const socket = getSocket();
-
-    // load current user id once
     (async () => {
       try {
         const profileJson = await AsyncStorage.getItem('userProfile');
@@ -57,48 +78,111 @@ const ChatScreen = ({ navigation, route }) => {
         if (mounted) setCurrentUserId(uid);
       } catch {}
     })();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  // Message listener - IMPORTANT: Only listen to this specific conversation
+  useEffect(() => {
+    let mounted = true;
+    const socket = getSocket();
+
+    if (cacheKey) {
+      (async () => {
+        try {
+          const cached = await AsyncStorage.getItem(cacheKey);
+          const parsed = cached ? JSON.parse(cached) : null;
+          if (mounted && Array.isArray(parsed)) {
+            setMessages(parsed.map(m => ({
+              ...m,
+              timestamp: m.timestamp ? new Date(m.timestamp) : new Date(),
+            })));
+          }
+        } catch {}
+      })();
+    }
 
     if (conversationId) {
       joinSession({ conversationId });
-      // fetch existing messages
       (async () => {
         try {
           const res = await fetch(`${BACKEND_URL}/conversations/${conversationId}/messages`);
           const json = await res.json();
           if (mounted && Array.isArray(json.messages)) {
-            const normalized = json.messages.map(m => ({
-              id: m.id || `${m.sender_id}-${m.sent_at}`,
-              text: m.content,
-              sender: currentUserId && m.sender_id === currentUserId ? 'user' : 'companion',
-              timestamp: new Date(m.sent_at || Date.now()),
-            }));
-            setMessages(normalized);
+            setMessages(json.messages.map(normalizeMessage));
           }
-        } catch (e) {
-          // no-op display fallback
-        }
+        } catch {}
       })();
     }
 
+    // Create a unique event listener for this conversation
+    const messageHandler = (m) => {
+      if (!mounted || !m) return;
+      
+      // Only process messages for THIS conversation
+      if (m.conversation_id !== conversationId && m.conversationId !== conversationId) {
+        console.log(`[CHAT] Ignoring message from different conversation. Expecting: ${conversationId}, got: ${m.conversation_id || m.conversationId}`);
+        return;
+      }
+
+      const normalized = normalizeMessage(m);
+      setMessages((prev) => {
+        // Prevent duplicates
+        if (prev.some(msg => msg.id === normalized.id)) {
+          return prev;
+        }
+        return [...prev, normalized];
+      });
+
+      // Update active chat with last message preview
+      updateActiveChatMessage(conversationId, normalized.text.substring(0, 50));
+    };
+
     socket.off('message:new');
-    socket.on('message:new', (m) => {
+    socket.on('message:new', messageHandler);
+
+    // Handle chat ended event
+    const chatEndedHandler = (data) => {
       if (!mounted) return;
-      setMessages((prev) => ([
-        ...prev,
-        {
-          id: m.id || `${m.sender_id}-${m.sent_at}`,
-          text: m.content,
-          sender: currentUserId && m.sender_id === currentUserId ? 'user' : 'companion',
-          timestamp: new Date(m.sent_at || Date.now()),
-        },
-      ]));
-    });
+      console.log(`[CHAT] Chat ended by ${data.endedBy}`);
+      removeActiveChat?.(conversationId);
+      // Navigate back after a brief delay
+      setTimeout(() => {
+        navigation.goBack();
+      }, 1000);
+    };
+
+    socket.off('chat:ended');
+    socket.on('chat:ended', chatEndedHandler);
 
     return () => {
       mounted = false;
-      socket.off('message:new');
+      socket.off('message:new', messageHandler);
+      socket.off('chat:ended', chatEndedHandler);
     };
-  }, [conversationId, companion?.id, currentUserId]);
+  }, [cacheKey, conversationId, companion?.id]);
+
+  useEffect(() => {
+    if (!cacheKey) return;
+    (async () => {
+      try {
+        const serializable = messages.slice(-200).map(m => ({
+          id: m.id,
+          text: m.text,
+          sender: m.sender,
+          timestamp: m.timestamp instanceof Date ? m.timestamp.toISOString() : m.timestamp,
+        }));
+        await AsyncStorage.setItem(cacheKey, JSON.stringify(serializable));
+      } catch {}
+    })();
+  }, [cacheKey, messages]);
+
+  useEffect(() => {
+    const callActive = mode === 'voice';
+    setIsCallActive(callActive);
+    setCallStatus?.(callActive);
+  }, [mode, setCallStatus]);
 
   useEffect(() => {
     if (isCallActive) {
@@ -150,8 +234,20 @@ const ChatScreen = ({ navigation, route }) => {
     const toSend = inputText;
     setInputText('');
 
+    // Update active chat with last message preview
+    updateActiveChatMessage(conversationId, toSend.substring(0, 50));
+
     if (conversationId) {
-      socketSendMessage({ conversationId, senderId: currentUserId || 'USER', content: toSend, type: 'text' });
+      (async () => {
+        try {
+          await fetch(`${BACKEND_URL}/conversations/${conversationId}/messages`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ senderId: currentUserId || 'USER', content: toSend, type: 'text' }),
+
+          });
+        } catch {}
+      })();
     }
   };
 
@@ -159,8 +255,38 @@ const ChatScreen = ({ navigation, route }) => {
     setInputText(prompt.text);
   };
 
+  const handleEndChat = () => {
+    // End chat on backend
+    if (conversationId) {
+      (async () => {
+        try {
+          await fetch(`${BACKEND_URL}/conversations/${conversationId}/end`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userId: currentUserId || 'USER' }),
+          });
+        } catch (e) {
+          console.log('Error ending chat:', e);
+        }
+      })();
+      
+      // Remove from active chats
+      removeActiveChat?.(conversationId);
+      
+      // Emit socket event to notify other participant
+      const socket = getSocket();
+      if (socket) {
+        socket.emit('chat:end', { conversationId, userId: currentUserId });
+      }
+    }
+
+    setMessages([]);
+    navigation.goBack();
+  };
+
   const handleEndCall = () => {
     setIsCallActive(false);
+    setCallStatus?.(false);
     if (callTimerRef.current) {
       clearInterval(callTimerRef.current);
     }
@@ -285,16 +411,28 @@ const ChatScreen = ({ navigation, route }) => {
               <Text style={styles.headerStatus}>Online</Text>
             </View>
           </View>
-          <TouchableOpacity 
-            style={styles.callButton}
-            onPress={() => setIsCallActive(true)}
-          >
-            <MaterialCommunityIcons
-              name="phone"
-              size={28}
-              color={colors.primary.main}
-            />
-          </TouchableOpacity>
+          <View style={styles.headerButtons}>
+            <TouchableOpacity 
+              style={styles.callButton}
+              onPress={() => setIsCallActive(true)}
+            >
+              <MaterialCommunityIcons
+                name="phone"
+                size={28}
+                color={colors.primary.main}
+              />
+            </TouchableOpacity>
+            <TouchableOpacity 
+              style={styles.endChatButton}
+              onPress={handleEndChat}
+            >
+              <MaterialCommunityIcons
+                name="close-circle"
+                size={28}
+                color={colors.accent.red}
+              />
+            </TouchableOpacity>
+          </View>
         </View>
 
         {/* Messages */}
@@ -500,7 +638,15 @@ const styles = StyleSheet.create({
     fontSize: typography.sizes.sm,
     color: colors.secondary.green,
   },
+  headerButtons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
   callButton: {
+    padding: spacing.sm,
+  },
+  endChatButton: {
     padding: spacing.sm,
   },
   messagesContainer: {

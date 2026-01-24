@@ -1,5 +1,6 @@
 // Navigation - Elderly User Stack
 import React from 'react';
+import { View } from 'react-native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -23,6 +24,7 @@ import {
 } from '../screens/elderly';
 
 import { colors, typography, spacing } from '../theme';
+import { ActiveSessionOverlay, ActiveChatOverlay } from '../components/common';
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -93,6 +95,16 @@ const ElderlyTabNavigator = () => {
   );
 };
 
+const ElderlyMainScreen = () => {
+  return (
+    <View style={{ flex: 1 }}>
+      <ElderlyTabNavigator />
+      <ActiveSessionOverlay />
+      <ActiveChatOverlay />
+    </View>
+  );
+};
+
 // Stack Navigator wrapping tabs for modal screens
 const ElderlyNavigator = () => {
   return (
@@ -102,7 +114,7 @@ const ElderlyNavigator = () => {
         animation: 'slide_from_right',
       }}
     >
-      <Stack.Screen name="ElderlyMain" component={ElderlyTabNavigator} />
+      <Stack.Screen name="ElderlyMain" component={ElderlyMainScreen} />
       <Stack.Screen name="CompanionMatching" component={CompanionMatchingScreen} />
       <Stack.Screen name="Chat" component={ChatScreen} />
       <Stack.Screen name="HelpCategories" component={HelpCategoriesScreen} />

@@ -28,6 +28,9 @@ const io = new SocketIOServer(server, {
 // In-memory presence and session routing
 const onlineVolunteers = new Map(); // volunteerId -> socketId
 const sessions = new Map(); // conversationId -> { seniorId, volunteerId }
+const userSockets = new Map(); // userId -> socketId
+const pushTokens = new Map(); // userId -> expoPushToken
+const pendingRequests = new Map(); // seniorId -> { status: 'pending'|'claimed', volunteerId?: string }
 
 // ----- Site mail OTP helpers -----
 // In-memory OTP store: email -> { code, expiresAt }
@@ -87,116 +90,34 @@ const saveMessage = async ({ conversationId, senderId, content, type = 'text' })
   return data;
 };
 
-// HTTP endpoints
-app.get('/health', (_req, res) => res.json({ ok: true }));
+// Helper to send push notifications via Expo
+const sendPushNotification = async (userId, title, body, data = {}) => {
+  const token = pushTokens.get(userId);
+  if (!token) return;
 
-app.get('/conversations/:id/messages', async (req, res) => {
   try {
-    const { id } = req.params;
-    const { data, error } = await supabase
-      .from(TABLES.MESSAGES)
-      .select('*')
-      .eq('conversation_id', id)
-      .order('sent_at', { ascending: true });
-    if (error) throw error;
-    res.json({ messages: data });
+    console.log(`[PUSH] Sending notification to user ${userId}: ${title}`);
+    await fetch('https://exp.host/--/api/v2/push/send', {
+      method: 'POST',
+      headers: {
+        'Accept': 'application/json',
+        'Accept-encoding': 'gzip, deflate',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        to: token,
+        sound: 'default',
+        title,
+        body,
+        data,
+      }),
+    });
   } catch (e) {
-    console.error(`[ERROR] Registration request failed:`, e);
-    res.status(500).json({ error: e.message });
+    console.error(`[PUSH] Error sending notification:`, e);
   }
-});
-// Registration endpoints moved below ensureAuth
+};
 
-app.post('/conversations/:id/messages', async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { senderId, content, type } = req.body || {};
-    if (!senderId || !content) return res.status(400).json({ error: 'senderId and content required' });
-    const message = await saveMessage({ conversationId: id, senderId, content, type });
-    // broadcast to room
-    io.to(`conv:${id}`).emit('message:new', message);
-    res.json({ message });
-  } catch (e) {
-    console.error(`[ERROR] Registration request failed:`, e);
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// Socket handlers
-io.on('connection', (socket) => {
-  // Client should emit identify with { userId, role: 'VOLUNTEER'|'SENIOR' }
-  socket.on('identify', ({ userId, role }) => {
-    socket.data.userId = userId;
-    socket.data.role = role;
-    if (role === 'VOLUNTEER') {
-      onlineVolunteers.set(userId, socket.id);
-      io.emit('volunteer:online', { volunteerId: userId });
-    }
-  });
-
-  // Seeker requests a companion
-  socket.on('seeker:request', async ({ seniorId }) => {
-    try {
-      // Find any online volunteer (simple strategy; enhance with filters later)
-      const entry = onlineVolunteers.entries().next();
-      if (entry.done) {
-        socket.emit('seeker:queued');
-        return;
-      }
-      const [volunteerId, volunteerSocketId] = entry.value;
-      const conversation = await createConversation(seniorId, volunteerId);
-      const convRoom = `conv:${conversation.id}`;
-      sessions.set(conversation.id, { seniorId, volunteerId });
-
-      // Join room and notify both sides
-      socket.join(convRoom);
-      io.sockets.sockets.get(volunteerSocketId)?.join(convRoom);
-
-      io.to(convRoom).emit('session:started', {
-        conversationId: conversation.id,
-        seniorId,
-        volunteerId,
-      });
-    } catch (e) {
-      socket.emit('error', { message: e.message });
-    }
-  });
-
-  // Allow clients to join an existing conversation room
-  socket.on('session:join', ({ conversationId }) => {
-    socket.join(`conv:${conversationId}`);
-  });
-
-  // Chat message
-  socket.on('message:send', async ({ conversationId, senderId, content, type }) => {
-    try {
-      const saved = await saveMessage({ conversationId, senderId, content, type });
-      io.to(`conv:${conversationId}`).emit('message:new', saved);
-    } catch (e) {
-      socket.emit('error', { message: e.message });
-    }
-  });
-
-  // WebRTC signaling relays within conversation room
-  socket.on('webrtc:offer', ({ conversationId, sdp }) => {
-    socket.to(`conv:${conversationId}`).emit('webrtc:offer', { sdp });
-  });
-  socket.on('webrtc:answer', ({ conversationId, sdp }) => {
-    socket.to(`conv:${conversationId}`).emit('webrtc:answer', { sdp });
-  });
-  socket.on('webrtc:ice-candidate', ({ conversationId, candidate }) => {
-    socket.to(`conv:${conversationId}`).emit('webrtc:ice-candidate', { candidate });
-  });
-
-  socket.on('disconnect', () => {
-    if (socket.data?.role === 'VOLUNTEER' && socket.data?.userId) {
-      onlineVolunteers.delete(socket.data.userId);
-      io.emit('volunteer:offline', { volunteerId: socket.data.userId });
-    }
-  });
-});
-
-// ----- Auth middleware and profile endpoints (OTP + avatar emoji) -----
+// Middleware for authentication
 const ensureAuth = async (req, res, next) => {
   try {
     const header = req.headers.authorization || '';
@@ -258,6 +179,312 @@ const ensureAuth = async (req, res, next) => {
   }
 };
 
+// HTTP endpoints
+app.get('/health', (_req, res) => res.json({ ok: true }));
+
+app.post('/auth/register-push-token', ensureAuth, async (req, res) => {
+  const { token } = req.body;
+  if (!token) return res.status(400).json({ error: 'Token required' });
+  pushTokens.set(req.user.id, token);
+  console.log(`[PUSH] Registered token for user ${req.user.id}`);
+  res.json({ ok: true });
+});
+
+app.post('/conversations/find-or-create', async (req, res) => {
+  try {
+    const { seniorId, companionId } = req.body || {};
+    if (!seniorId || !companionId) {
+      return res.status(400).json({ error: 'seniorId and companionId required' });
+    }
+
+    let existing = null;
+    try {
+      const { data, error } = await supabase
+        .from(TABLES.CONVERSATIONS)
+        .select('*')
+        .eq('senior_id', seniorId)
+        .eq('companion_id', companionId)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (error) throw error;
+      existing = data;
+    } catch (e) {
+      const { data, error } = await supabase
+        .from(TABLES.CONVERSATIONS)
+        .select('*')
+        .eq('senior_id', seniorId)
+        .eq('companion_id', companionId)
+        .limit(1)
+        .maybeSingle();
+      if (error) throw error;
+      existing = data;
+    }
+
+    if (existing) return res.json({ conversation: existing });
+
+    const conversation = await createConversation(seniorId, companionId);
+    res.json({ conversation });
+  } catch (e) {
+    console.error(`[ERROR] find-or-create conversation failed:`, e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/conversations/:id/messages', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (String(id).startsWith('local-')) {
+      return res.json({ messages: [] });
+    }
+
+    // Validate conversation exists
+    const { data: convo, error: convoError } = await supabase
+      .from(TABLES.CONVERSATIONS)
+      .select('id')
+      .eq('id', id)
+      .single();
+    
+    if (convoError || !convo) {
+      return res.status(404).json({ error: 'Conversation not found' });
+    }
+
+    // Get messages for this specific conversation only
+    const { data, error } = await supabase
+      .from(TABLES.MESSAGES)
+      .select('*')
+      .eq('conversation_id', id)
+      .order('created_at', { ascending: true });
+
+    if (error) throw error;
+    
+    console.log(`[CHAT] Retrieved ${data?.length || 0} messages for conversation ${id}`);
+    res.json({ messages: data || [] });
+  } catch (e) {
+    console.error(`[ERROR] Failed to fetch messages:`, e);
+    res.status(500).json({ error: e.message });
+  }
+});
+// Registration endpoints moved below ensureAuth
+
+app.post('/conversations/:id/messages', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { senderId, content, type } = req.body || {};
+    if (!senderId || !content) return res.status(400).json({ error: 'senderId and content required' });
+    
+    // Validate conversation exists
+    const { data: convo, error: convoError } = await supabase
+      .from(TABLES.CONVERSATIONS)
+      .select('id')
+      .eq('id', id)
+      .single();
+    
+    if (convoError || !convo) {
+      return res.status(404).json({ error: 'Conversation not found' });
+    }
+
+    const message = await saveMessage({ conversationId: id, senderId, content, type });
+    
+    // Ensure conversation_id is included in the broadcasted message
+    const messageToEmit = {
+      ...message,
+      conversation_id: id,
+    };
+    
+    // CRITICAL: Only broadcast to the specific conversation room
+    io.to(`conv:${id}`).emit('message:new', messageToEmit);
+    console.log(`[CHAT] Message posted to conversation ${id} from ${senderId}`);
+    
+    res.json({ message: messageToEmit });
+  } catch (e) {
+    console.error(`[ERROR] Failed to post message:`, e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// End conversation endpoint
+app.post('/conversations/:id/end', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { userId } = req.body || {};
+    if (!userId) return res.status(400).json({ error: 'userId required' });
+    
+    // Validate conversation exists
+    const { data: convo, error: convoError } = await supabase
+      .from(TABLES.CONVERSATIONS)
+      .select('id, status')
+      .eq('id', id)
+      .single();
+    
+    if (convoError || !convo) {
+      return res.status(404).json({ error: 'Conversation not found' });
+    }
+
+    // Update conversation status
+    const { data: updated, error: updateError } = await supabase
+      .from(TABLES.CONVERSATIONS)
+      .update({ status: 'ended', ended_at: new Date().toISOString() })
+      .eq('id', id)
+      .select()
+      .single();
+    
+    if (updateError) throw updateError;
+    
+    // Notify all participants that chat has ended
+    io.to(`conv:${id}`).emit('chat:ended', { conversationId: id, endedBy: userId });
+    console.log(`[CHAT] Conversation ${id} ended by ${userId}`);
+    
+    res.json({ conversation: updated });
+  } catch (e) {
+    console.error(`[ERROR] Failed to end conversation:`, e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Socket handlers
+io.on('connection', (socket) => {
+  // Client should emit identify with { userId, role: 'VOLUNTEER'|'SENIOR' }
+  socket.on('identify', ({ userId, role }) => {
+    socket.data.userId = userId;
+    socket.data.role = role;
+    if (userId) userSockets.set(userId, socket.id);
+    if (role === 'VOLUNTEER') {
+      onlineVolunteers.set(userId, socket.id);
+      io.emit('volunteer:online', { volunteerId: userId });
+    }
+  });
+
+  // Senior requests a companion: notify all online volunteers to accept
+  socket.on('seeker:request', async ({ seniorId }) => {
+    try {
+      if (!seniorId) return;
+      pendingRequests.set(seniorId, { status: 'pending' });
+
+      if (onlineVolunteers.size === 0) {
+        socket.emit('seeker:queued');
+      }
+
+      // Notify all online volunteers via socket
+      onlineVolunteers.forEach((volSocketId, volId) => {
+        io.to(volSocketId).emit('seeker:incoming', { seniorId });
+        // Optional push notification if token present
+        sendPushNotification(volId, 'New chat request', 'A senior is seeking companionship', { seniorId });
+      });
+    } catch (e) {
+      socket.emit('error', { message: e.message });
+    }
+  });
+
+  // Volunteer accepts a pending request
+  socket.on('volunteer:accept', async ({ seniorId, volunteerId }) => {
+    try {
+      if (!seniorId || !volunteerId) return;
+      const req = pendingRequests.get(seniorId);
+      if (!req || req.status !== 'pending') {
+        return; // already claimed or not pending
+      }
+      // claim
+      pendingRequests.set(seniorId, { status: 'claimed', volunteerId });
+
+      // Create conversation and wire sockets into room
+      const conversation = await createConversation(seniorId, volunteerId);
+      const convRoom = `conv:${conversation.id}`;
+      sessions.set(conversation.id, { seniorId, volunteerId });
+
+      const seniorSocketId = userSockets.get(seniorId);
+      const volunteerSocketId = onlineVolunteers.get(volunteerId);
+      if (seniorSocketId) io.sockets.sockets.get(seniorSocketId)?.join(convRoom);
+      if (volunteerSocketId) io.sockets.sockets.get(volunteerSocketId)?.join(convRoom);
+
+      // Notify chosen volunteer and senior
+      if (seniorSocketId) io.to(seniorSocketId).emit('session:started', { conversationId: conversation.id, seniorId, volunteerId });
+      if (volunteerSocketId) io.to(volunteerSocketId).emit('session:started', { conversationId: conversation.id, seniorId, volunteerId });
+
+      // Notify others that request was claimed
+      onlineVolunteers.forEach((volSocketId, volId) => {
+        if (volId !== volunteerId) io.to(volSocketId).emit('request:claimed', { seniorId, volunteerId });
+      });
+
+      // Push notifications to both sides
+      sendPushNotification(seniorId, 'Companion found', 'A volunteer accepted your chat request', { conversationId: conversation.id, volunteerId });
+      sendPushNotification(volunteerId, 'Chat started', 'You accepted the senior chat request', { conversationId: conversation.id, seniorId });
+    } catch (e) {
+      socket.emit('error', { message: e.message });
+    }
+  });
+
+  // Allow clients to join an existing conversation room
+  socket.on('session:join', ({ conversationId }) => {
+    socket.join(`conv:${conversationId}`);
+  });
+
+  // Chat message - IMPORTANT: Only broadcast to the specific conversation room
+  socket.on('message:send', async ({ conversationId, senderId, content, type }) => {
+    try {
+      if (!conversationId) {
+        return socket.emit('error', { message: 'conversationId required' });
+      }
+      const saved = await saveMessage({ conversationId, senderId, content, type });
+      // Ensure conversation_id is in the message object
+      const messageToEmit = {
+        ...saved,
+        conversation_id: conversationId,
+      };
+      // CRITICAL: Only emit to the specific conversation room, NOT to all users
+      io.to(`conv:${conversationId}`).emit('message:new', messageToEmit);
+      console.log(`[CHAT] Message sent in conversation ${conversationId} from ${senderId}`);
+    } catch (e) {
+      socket.emit('error', { message: e.message });
+    }
+  });
+
+  // End chat handler
+  socket.on('chat:end', async ({ conversationId, userId }) => {
+    try {
+      if (!conversationId) {
+        return socket.emit('error', { message: 'conversationId required' });
+      }
+      // Update conversation status to ended
+      const { error } = await supabase
+        .from(TABLES.CONVERSATIONS)
+        .update({ status: 'ended', ended_at: new Date().toISOString() })
+        .eq('id', conversationId);
+      if (error) throw error;
+      
+      // Notify all participants that chat has ended
+      io.to(`conv:${conversationId}`).emit('chat:ended', { conversationId, endedBy: userId });
+      console.log(`[CHAT] Conversation ${conversationId} ended by ${userId}`);
+    } catch (e) {
+      socket.emit('error', { message: e.message });
+    }
+  });
+
+  // WebRTC signaling relays within conversation room
+  socket.on('webrtc:offer', ({ conversationId, sdp }) => {
+    socket.to(`conv:${conversationId}`).emit('webrtc:offer', { sdp });
+  });
+  socket.on('webrtc:answer', ({ conversationId, sdp }) => {
+    socket.to(`conv:${conversationId}`).emit('webrtc:answer', { sdp });
+  });
+  socket.on('webrtc:ice-candidate', ({ conversationId, candidate }) => {
+    socket.to(`conv:${conversationId}`).emit('webrtc:ice-candidate', { candidate });
+  });
+
+  socket.on('disconnect', () => {
+    if (socket.data?.role === 'VOLUNTEER' && socket.data?.userId) {
+      onlineVolunteers.delete(socket.data.userId);
+      io.emit('volunteer:offline', { volunteerId: socket.data.userId });
+    }
+    if (socket.data?.userId) {
+      // Keep last known socket? For simplicity, delete mapping
+      userSockets.delete(socket.data.userId);
+    }
+  });
+});
+
+// ----- Auth middleware and profile endpoints (OTP + avatar emoji) -----
 const ensureAdmin = (req, res, next) => {
   ensureAuth(req, res, () => {
     console.log(`[AUTH] Checking admin access for user:`, {
