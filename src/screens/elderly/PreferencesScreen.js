@@ -1,5 +1,5 @@
 // Preferences Screen
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -9,10 +9,13 @@ import {
   TouchableOpacity,
   Switch,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { colors, typography, spacing } from '../../theme';
 import { LargeButton } from '../../components/common';
+import { BACKEND_URL as API_BASE } from '../../config/backend';
 
 const PreferencesScreen = ({ navigation }) => {
   const [preferences, setPreferences] = useState({
@@ -27,6 +30,68 @@ const PreferencesScreen = ({ navigation }) => {
     soundEffects: true,
     vibration: true,
   });
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    loadPreferences();
+  }, []);
+
+  const loadPreferences = async () => {
+    try {
+      setLoading(true);
+      
+      // First, try to fetch from backend
+      try {
+        const token = await AsyncStorage.getItem('userToken');
+        if (token) {
+          const resp = await fetch(`${API_BASE}/me`, {
+            method: 'GET',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`,
+            },
+          });
+
+          if (resp.ok) {
+            const result = await resp.json();
+            const profile = result.profile || result.user || {};
+            
+            if (profile.preferences) {
+              setPreferences({
+                language: profile.preferences.language || 'en',
+                voiceEnabled: profile.preferences.voiceEnabled !== undefined ? profile.preferences.voiceEnabled : true,
+                largeText: profile.preferences.largeText !== undefined ? profile.preferences.largeText : true,
+                highContrast: profile.preferences.highContrast !== undefined ? profile.preferences.highContrast : false,
+                notifications: profile.preferences.notifications !== undefined ? profile.preferences.notifications : true,
+                sosAlerts: profile.preferences.sosAlerts !== undefined ? profile.preferences.sosAlerts : true,
+                moodReminders: profile.preferences.moodReminders !== undefined ? profile.preferences.moodReminders : true,
+                companionCalls: profile.preferences.companionCalls !== undefined ? profile.preferences.companionCalls : true,
+                soundEffects: profile.preferences.soundEffects !== undefined ? profile.preferences.soundEffects : true,
+                vibration: profile.preferences.vibration !== undefined ? profile.preferences.vibration : true,
+              });
+              return; // Successfully loaded from backend
+            }
+          }
+        }
+      } catch (backendError) {
+        console.warn('Error fetching from backend, falling back to local storage:', backendError);
+      }
+      
+      // Fallback to AsyncStorage
+      const prefsJson = await AsyncStorage.getItem('userPreferences');
+      if (prefsJson) {
+        const parsedPrefs = JSON.parse(prefsJson);
+        setPreferences({
+          ...preferences,
+          ...parsedPrefs,
+        });
+      }
+    } catch (error) {
+      console.error('Error loading preferences:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const languages = [
     { id: 'en', name: 'English', native: 'English' },
@@ -41,8 +106,47 @@ const PreferencesScreen = ({ navigation }) => {
     setPreferences(prev => ({ ...prev, [key]: !prev[key] }));
   };
 
-  const handleSave = () => {
-    Alert.alert('Saved!', 'Your preferences have been updated.');
+  const handleSave = async () => {
+    setLoading(true);
+    try {
+      const token = await AsyncStorage.getItem('userToken');
+      
+      const resp = await fetch(`${API_BASE}/profile`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          preferences: preferences,
+        }),
+      });
+
+      const result = await resp.json();
+      if (!resp.ok) throw new Error(result?.error || 'Failed to save preferences');
+
+      // Also save to AsyncStorage as backup
+      await AsyncStorage.setItem('userPreferences', JSON.stringify(preferences));
+      
+      // Update userProfile in AsyncStorage
+      try {
+        const profileJson = await AsyncStorage.getItem('userProfile');
+        if (profileJson) {
+          const profile = JSON.parse(profileJson);
+          profile.preferences = preferences;
+          await AsyncStorage.setItem('userProfile', JSON.stringify(profile));
+        }
+      } catch (e) {
+        console.warn('Failed to update userProfile:', e);
+      }
+      
+      Alert.alert('Saved!', 'Your preferences have been updated.');
+    } catch (error) {
+      console.error('Error saving preferences:', error);
+      Alert.alert('Error', error.message || 'Failed to save preferences');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const SettingRow = ({ icon, title, subtitle, value, onToggle }) => (
@@ -85,6 +189,9 @@ const PreferencesScreen = ({ navigation }) => {
         style={styles.content}
         showsVerticalScrollIndicator={false}
       >
+        {loading && (
+          <ActivityIndicator size="large" color={colors.primary.main} style={{ marginTop: 20 }} />
+        )}
         {/* Language Section */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>🌐 Language</Text>

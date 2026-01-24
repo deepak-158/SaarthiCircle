@@ -590,6 +590,9 @@ app.put('/profile', ensureAuth, async (req, res) => {
       is_approved,
       help_count,
       rating,
+      emergency_contacts,
+      health_info,
+      preferences,
     } = req.body || {};
 
     const update = { id: req.user.id };
@@ -604,18 +607,48 @@ app.put('/profile', ensureAuth, async (req, res) => {
 
     if (role !== undefined) update.role = role;
 
+    // Get existing metadata to merge with new data
+    let existingMetadata = {};
+    try {
+      const { data: existingData } = await supabase
+        .from(TABLES.USERS)
+        .select('avatar_emoji')
+        .eq('id', req.user.id)
+        .single();
+      
+      if (existingData?.avatar_emoji) {
+        try {
+          if (typeof existingData.avatar_emoji === 'string' && (existingData.avatar_emoji.startsWith('{') || existingData.avatar_emoji.startsWith('['))) {
+            existingMetadata = JSON.parse(existingData.avatar_emoji);
+          } else if (typeof existingData.avatar_emoji === 'object') {
+            existingMetadata = existingData.avatar_emoji;
+          }
+        } catch (e) {
+          console.warn(`[PROFILE] Failed to parse existing metadata:`, e);
+        }
+      }
+    } catch (e) {
+      console.warn(`[PROFILE] Failed to fetch existing metadata:`, e);
+    }
+
     // We store all extra info in avatar_emoji as a JSON string since we can't add columns
     const metadata = {
-      gender,
-      age,
-      city,
-      address,
-      skills,
-      why_volunteer,
-      availability,
-      preferred_help_types,
-      is_approved,
-      avatar_emoji: avatarForGender(gender)
+      ...existingMetadata, // Preserve existing metadata
+      gender: gender !== undefined ? gender : existingMetadata.gender,
+      age: age !== undefined ? age : existingMetadata.age,
+      city: city !== undefined ? city : existingMetadata.city,
+      address: address !== undefined ? address : existingMetadata.address,
+      pincode: pincode !== undefined ? pincode : existingMetadata.pincode,
+      date_of_birth: date_of_birth !== undefined ? date_of_birth : existingMetadata.date_of_birth,
+      skills: skills !== undefined ? skills : existingMetadata.skills,
+      why_volunteer: why_volunteer !== undefined ? why_volunteer : existingMetadata.why_volunteer,
+      availability: availability !== undefined ? availability : existingMetadata.availability,
+      preferred_help_types: preferred_help_types !== undefined ? preferred_help_types : existingMetadata.preferred_help_types,
+      emergency_contacts: emergency_contacts !== undefined ? emergency_contacts : existingMetadata.emergency_contacts,
+      health_info: health_info !== undefined ? health_info : existingMetadata.health_info,
+      preferences: preferences !== undefined ? preferences : existingMetadata.preferences,
+      is_approved: is_approved !== undefined ? is_approved : existingMetadata.is_approved,
+      avatar_emoji: avatarForGender(gender !== undefined ? gender : existingMetadata.gender)
     };
     update.avatar_emoji = JSON.stringify(metadata);
 

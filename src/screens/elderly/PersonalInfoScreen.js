@@ -36,6 +36,43 @@ const PersonalInfoScreen = ({ navigation }) => {
   const loadProfile = async () => {
     try {
       setLoading(true);
+      
+      // First, try to fetch from backend to get the latest saved data
+      try {
+        const token = await AsyncStorage.getItem('userToken');
+        if (token) {
+          const resp = await fetch(`${API_BASE}/me`, {
+            method: 'GET',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`,
+            },
+          });
+
+          if (resp.ok) {
+            const result = await resp.json();
+            const profile = result.profile || result.user || {};
+            
+            // Update AsyncStorage with latest data
+            await AsyncStorage.setItem('userProfile', JSON.stringify(profile));
+            
+            setFormData({
+              fullName: profile.name || profile.full_name || '',
+              phone: profile.phone || '',
+              email: profile.email || '',
+              dateOfBirth: profile.date_of_birth || '',
+              address: profile.address || '',
+              city: profile.city || '',
+              pincode: profile.pincode || '',
+            });
+            return; // Successfully loaded from backend
+          }
+        }
+      } catch (backendError) {
+        console.warn('Error fetching from backend, falling back to local storage:', backendError);
+      }
+      
+      // Fallback to AsyncStorage if backend fetch fails
       const profileJson = await AsyncStorage.getItem('userProfile');
       if (profileJson) {
         const profile = JSON.parse(profileJson);
@@ -82,6 +119,17 @@ const PersonalInfoScreen = ({ navigation }) => {
       // Update local storage
       const updatedProfile = { ...result.profile };
       await AsyncStorage.setItem('userProfile', JSON.stringify(updatedProfile));
+      
+      // Update form data with saved values
+      setFormData({
+        fullName: updatedProfile.name || updatedProfile.full_name || formData.fullName,
+        phone: updatedProfile.phone || formData.phone,
+        email: updatedProfile.email || formData.email,
+        dateOfBirth: updatedProfile.date_of_birth || formData.dateOfBirth,
+        address: updatedProfile.address || formData.address,
+        city: updatedProfile.city || formData.city,
+        pincode: updatedProfile.pincode || formData.pincode,
+      });
       
       Alert.alert('Saved!', 'Your personal information has been updated.');
       setIsEditing(false);

@@ -51,8 +51,8 @@ const HomeScreen = ({ navigation }) => {
         setUserProfile({
           ...DEFAULT_PROFILE,
           ...profile,
-          // Use actual name or fallback to 'Friend'
-          fullName: profile.fullName || DEFAULT_PROFILE.fullName,
+          // Use actual name or fallback to 'Friend' - handle both name and fullName fields
+          fullName: profile.name || profile.full_name || profile.fullName || DEFAULT_PROFILE.fullName,
         });
       }
     } catch (error) {
@@ -97,7 +97,9 @@ const HomeScreen = ({ navigation }) => {
             <View style={styles.greetingContainer}>
               <Text style={styles.greetingTime}>{greeting} 🌸</Text>
               <Text style={styles.greetingName}>
-                {userProfile.fullName ? `Hello, ${userProfile.fullName.split(' ')[0]}!` : t.home.greeting}
+                {userProfile.fullName && userProfile.fullName !== DEFAULT_PROFILE.fullName 
+                  ? `Hello, ${userProfile.fullName.split(' ')[0]}!` 
+                  : t.home.greeting}
               </Text>
               <Text style={styles.safeMessage}>{t.home.safeMessage}</Text>
               {userProfile.city && userProfile.city !== 'Your City' && (

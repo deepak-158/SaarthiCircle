@@ -16,10 +16,12 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { colors, typography, spacing } from '../../theme';
 import { AccessibleInput, LargeButton } from '../../components/common';
+import { BACKEND_URL as API_BASE } from '../../config/backend';
 
 const EmergencyContactsScreen = ({ navigation }) => {
   const [contacts, setContacts] = useState([]);
   const [showModal, setShowModal] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [newContact, setNewContact] = useState({
     name: '',
     phone: '',
@@ -32,28 +34,98 @@ const EmergencyContactsScreen = ({ navigation }) => {
 
   const loadContacts = async () => {
     try {
+      setLoading(true);
+      
+      // First, try to fetch from backend
+      try {
+        const token = await AsyncStorage.getItem('userToken');
+        if (token) {
+          const resp = await fetch(`${API_BASE}/me`, {
+            method: 'GET',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`,
+            },
+          });
+
+          if (resp.ok) {
+            const result = await resp.json();
+            const profile = result.profile || result.user || {};
+            
+            if (profile.emergency_contacts && Array.isArray(profile.emergency_contacts) && profile.emergency_contacts.length > 0) {
+              setContacts(profile.emergency_contacts);
+              await AsyncStorage.setItem('emergencyContacts', JSON.stringify(profile.emergency_contacts));
+              return; // Successfully loaded from backend
+            }
+          }
+        }
+      } catch (backendError) {
+        console.warn('Error fetching from backend, falling back to local storage:', backendError);
+      }
+      
+      // Fallback to AsyncStorage
       const contactsJson = await AsyncStorage.getItem('emergencyContacts');
       if (contactsJson) {
-        setContacts(JSON.parse(contactsJson));
-      } else {
-        // Set default contacts
-        const defaultContacts = [
-          { id: '1', name: 'Emergency Services', phone: '112', relationship: 'Emergency', isPrimary: true },
-        ];
-        setContacts(defaultContacts);
-        await AsyncStorage.setItem('emergencyContacts', JSON.stringify(defaultContacts));
+        const parsedContacts = JSON.parse(contactsJson);
+        if (Array.isArray(parsedContacts) && parsedContacts.length > 0) {
+          setContacts(parsedContacts);
+          return;
+        }
       }
+      
+      // Set default contacts if none exist
+      const defaultContacts = [
+        { id: '1', name: 'Emergency Services', phone: '112', relationship: 'Emergency', isPrimary: true },
+      ];
+      setContacts(defaultContacts);
+      await AsyncStorage.setItem('emergencyContacts', JSON.stringify(defaultContacts));
     } catch (error) {
       console.error('Error loading contacts:', error);
+    } finally {
+      setLoading(false);
     }
   };
 
   const saveContacts = async (updatedContacts) => {
     try {
+      setLoading(true);
+      const token = await AsyncStorage.getItem('userToken');
+      
+      // Save to backend
+      const resp = await fetch(`${API_BASE}/profile`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          emergency_contacts: updatedContacts,
+        }),
+      });
+
+      const result = await resp.json();
+      if (!resp.ok) throw new Error(result?.error || 'Failed to save emergency contacts');
+
+      // Also save to AsyncStorage as backup
       await AsyncStorage.setItem('emergencyContacts', JSON.stringify(updatedContacts));
       setContacts(updatedContacts);
+      
+      // Update userProfile in AsyncStorage
+      try {
+        const profileJson = await AsyncStorage.getItem('userProfile');
+        if (profileJson) {
+          const profile = JSON.parse(profileJson);
+          profile.emergency_contacts = updatedContacts;
+          await AsyncStorage.setItem('userProfile', JSON.stringify(profile));
+        }
+      } catch (e) {
+        console.warn('Failed to update userProfile:', e);
+      }
     } catch (error) {
       console.error('Error saving contacts:', error);
+      Alert.alert('Error', error.message || 'Failed to save emergency contacts');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -75,7 +147,7 @@ const EmergencyContactsScreen = ({ navigation }) => {
     await saveContacts(updatedContacts);
     setNewContact({ name: '', phone: '', relationship: '' });
     setShowModal(false);
-    Alert.alert('Success', 'Emergency contact added!');
+    Alert.alert('Success', 'Emergency contact added and saved!');
   };
 
   const handleDeleteContact = (id) => {

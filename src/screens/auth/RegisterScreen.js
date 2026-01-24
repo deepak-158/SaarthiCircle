@@ -140,7 +140,9 @@ const RegisterScreen = ({ navigation, route }) => {
         return;
       }
 
-      await authLogin(token, role, data.user || {});
+      // Use profile data from response (server returns { profile: ... } for both senior and volunteer)
+      const profileData = data.profile || data.user || {};
+      await authLogin(token, role, profileData);
 
       if (isVolunteer) {
         Alert.alert(

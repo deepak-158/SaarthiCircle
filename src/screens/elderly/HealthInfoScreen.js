@@ -1,5 +1,5 @@
 // Health Information Screen
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -8,10 +8,13 @@ import {
   ScrollView,
   TouchableOpacity,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { colors, typography, spacing } from '../../theme';
 import { AccessibleInput, LargeButton, LargeCard } from '../../components/common';
+import { BACKEND_URL as API_BASE } from '../../config/backend';
 
 const HealthInfoScreen = ({ navigation }) => {
   const [healthData, setHealthData] = useState({
@@ -24,6 +27,70 @@ const HealthInfoScreen = ({ navigation }) => {
     hospitalName: '',
   });
   const [isEditing, setIsEditing] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    loadHealthInfo();
+  }, []);
+
+  const loadHealthInfo = async () => {
+    try {
+      setLoading(true);
+      
+      // First, try to fetch from backend
+      try {
+        const token = await AsyncStorage.getItem('userToken');
+        if (token) {
+          const resp = await fetch(`${API_BASE}/me`, {
+            method: 'GET',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`,
+            },
+          });
+
+          if (resp.ok) {
+            const result = await resp.json();
+            const profile = result.profile || result.user || {};
+            
+            if (profile.health_info) {
+              setHealthData({
+                bloodGroup: profile.health_info.bloodGroup || '',
+                allergies: profile.health_info.allergies || '',
+                medications: profile.health_info.medications || '',
+                conditions: profile.health_info.conditions || [],
+                doctorName: profile.health_info.doctorName || '',
+                doctorPhone: profile.health_info.doctorPhone || '',
+                hospitalName: profile.health_info.hospitalName || '',
+              });
+              return; // Successfully loaded from backend
+            }
+          }
+        }
+      } catch (backendError) {
+        console.warn('Error fetching from backend, falling back to local storage:', backendError);
+      }
+      
+      // Fallback to AsyncStorage
+      const healthJson = await AsyncStorage.getItem('healthInfo');
+      if (healthJson) {
+        const parsedHealth = JSON.parse(healthJson);
+        setHealthData({
+          bloodGroup: parsedHealth.bloodGroup || '',
+          allergies: parsedHealth.allergies || '',
+          medications: parsedHealth.medications || '',
+          conditions: parsedHealth.conditions || [],
+          doctorName: parsedHealth.doctorName || '',
+          doctorPhone: parsedHealth.doctorPhone || '',
+          hospitalName: parsedHealth.hospitalName || '',
+        });
+      }
+    } catch (error) {
+      console.error('Error loading health info:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const commonConditions = [
     { id: 'diabetes', label: 'Diabetes', icon: '🩸' },
@@ -45,9 +112,48 @@ const HealthInfoScreen = ({ navigation }) => {
     }));
   };
 
-  const handleSave = () => {
-    Alert.alert('Saved!', 'Your health information has been updated.');
-    setIsEditing(false);
+  const handleSave = async () => {
+    setLoading(true);
+    try {
+      const token = await AsyncStorage.getItem('userToken');
+      
+      const resp = await fetch(`${API_BASE}/profile`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          health_info: healthData,
+        }),
+      });
+
+      const result = await resp.json();
+      if (!resp.ok) throw new Error(result?.error || 'Failed to save health information');
+
+      // Also save to AsyncStorage as backup
+      await AsyncStorage.setItem('healthInfo', JSON.stringify(healthData));
+      
+      // Update userProfile in AsyncStorage
+      try {
+        const profileJson = await AsyncStorage.getItem('userProfile');
+        if (profileJson) {
+          const profile = JSON.parse(profileJson);
+          profile.health_info = healthData;
+          await AsyncStorage.setItem('userProfile', JSON.stringify(profile));
+        }
+      } catch (e) {
+        console.warn('Failed to update userProfile:', e);
+      }
+      
+      Alert.alert('Saved!', 'Your health information has been updated.');
+      setIsEditing(false);
+    } catch (error) {
+      console.error('Error saving health info:', error);
+      Alert.alert('Error', error.message || 'Failed to save health information');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -81,6 +187,9 @@ const HealthInfoScreen = ({ navigation }) => {
         style={styles.content}
         showsVerticalScrollIndicator={false}
       >
+        {loading && !isEditing && (
+          <ActivityIndicator size="large" color={colors.primary.main} style={{ marginTop: 20 }} />
+        )}
         {/* Important Note */}
         <View style={styles.noteCard}>
           <MaterialCommunityIcons 
