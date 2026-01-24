@@ -32,19 +32,29 @@ const RegisterScreen = ({ navigation, route }) => {
 
   useEffect(() => {
     async function getStoredData() {
-      if (!email || !phone || !token) {
-        const t = await AsyncStorage.getItem('userToken');
-        const p = await AsyncStorage.getItem('userProfile');
-        if (t && !token) setToken(t);
-        if (p) {
-          const profile = JSON.parse(p);
-          if (profile.email && !email) setEmail(profile.email);
-          if (profile.phone && !phone) setPhone(profile.phone);
-        }
+      console.log('[DEBUG] RegisterScreen initial route params:', route.params);
+      
+      const storedToken = await AsyncStorage.getItem('userToken');
+      const storedProfile = await AsyncStorage.getItem('userProfile');
+      
+      if (route.params?.token) {
+        console.log('[DEBUG] Token found in route params');
+        setToken(route.params.token);
+      } else if (storedToken) {
+        console.log('[DEBUG] Token found in AsyncStorage');
+        setToken(storedToken);
+      } else {
+        console.warn('[DEBUG] No token found in params or storage');
+      }
+
+      if (storedProfile) {
+        const profile = JSON.parse(storedProfile);
+        if (profile.email && !email) setEmail(profile.email);
+        if (profile.phone && !phone) setPhone(profile.phone);
       }
     }
     getStoredData();
-  }, []);
+  }, [route.params]);
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
     fullName: '',
@@ -109,6 +119,9 @@ const RegisterScreen = ({ navigation, route }) => {
       }
 
       const endpoint = isVolunteer ? '/register/volunteer' : '/register/senior';
+      console.log(`[DEBUG] Attempting POST to ${BACKEND_URL}${endpoint}`);
+      console.log(`[DEBUG] Token being used: ${token ? 'Token exists' : 'Token is MISSING'}`);
+      
       const response = await fetch(`${BACKEND_URL}${endpoint}`, {
         method: 'POST',
         headers: {
@@ -118,7 +131,9 @@ const RegisterScreen = ({ navigation, route }) => {
         body: JSON.stringify(payload),
       });
 
+      console.log(`[DEBUG] Response status: ${response.status}`);
       const data = await response.json();
+      console.log(`[DEBUG] Response data:`, data);
 
       if (!response.ok) {
         Alert.alert('Error', data.error || data.message || 'Failed to register');

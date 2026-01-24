@@ -220,19 +220,24 @@ const ensureAuth = async (req, res, next) => {
     try {
       const decoded = jwt.verify(token, process.env.JWT_SECRET || 'dev_secret_change_me');
       req.user = { id: decoded.uid, email: decoded.email };
+      
       // Fetch full user to get role
-      const { data: user, error: userErr } = await supabase.from(TABLES.USERS).select('*').eq('id', decoded.uid).single();
-      if (user) {
-        req.user = { ...req.user, ...user };
-        return next();
-      } else if (userErr) {
-        console.warn(`[AUTH] User not found in DB for valid JWT: ${decoded.uid}`);
+      try {
+        const { data: user } = await supabase.from(TABLES.USERS).select('*').eq('id', decoded.uid).single();
+        if (user) {
+          req.user = { ...req.user, ...user };
+        }
+      } catch (dbErr) {
+        console.warn(`[AUTH] DB user lookup failed for ${decoded.uid}: ${dbErr.message}`);
       }
+      
+      return next(); // Token is valid, proceed (even if user not in DB yet)
     } catch (err) {
       // If it looks like our JWT but failed verification, don't fall back
-      if (err.name === 'JsonWebTokenError' || err.name === 'TokenExpiredError') {
-        return res.status(401).json({ error: `Invalid or expired token: ${err.message}` });
+      if (err.name === 'TokenExpiredError') {
+        return res.status(401).json({ error: `Token expired: ${err.message}` });
       }
+      // For other JWT errors, we might fall back to Supabase auth
     }
 
     // Fallback to Supabase token (legacy or third-party auth)
@@ -471,16 +476,30 @@ app.post('/auth/verify-otp', async (req, res) => {
       name: name ?? existing?.name ?? null,
       role: role ?? existing?.role ?? null,
       gender: gender ?? existing?.gender ?? null,
-      is_approved: role === 'admin' || role === 'elderly' ? true : (existing?.is_approved ?? false)
     };
+    
+    // Determine approved status
+    const isApproved = role === 'admin' || role === 'elderly' ? true : (existing?.is_approved ?? false);
     
     // Preserve existing avatar_emoji if it contains JSON metadata
     const currentAvatar = existing?.avatar_emoji;
     const isJson = currentAvatar && (currentAvatar.startsWith('{') || currentAvatar.startsWith('['));
+    
     if (!isJson) {
-      profile.avatar_emoji = avatarForGender(gender ?? existing?.gender);
+      const metadata = {
+        gender: gender ?? existing?.gender,
+        is_approved: isApproved,
+        avatar_emoji: avatarForGender(gender ?? existing?.gender)
+      };
+      profile.avatar_emoji = JSON.stringify(metadata);
     } else {
-      profile.avatar_emoji = currentAvatar;
+      try {
+        const metadata = JSON.parse(currentAvatar);
+        metadata.is_approved = isApproved;
+        profile.avatar_emoji = JSON.stringify(metadata);
+      } catch (e) {
+        profile.avatar_emoji = currentAvatar;
+      }
     }
     
     const { error: upsertErr } = await supabase.from(TABLES.USERS).upsert(profile, { onConflict: 'id' });
@@ -595,6 +614,7 @@ app.put('/profile', ensureAuth, async (req, res) => {
       why_volunteer,
       availability,
       preferred_help_types,
+      is_approved,
       avatar_emoji: avatarForGender(gender)
     };
     update.avatar_emoji = JSON.stringify(metadata);
@@ -634,6 +654,8 @@ app.post('/register/senior', ensureAuth, async (req, res) => {
       update.name = name;
     } else if (full_name !== undefined) {
       update.name = full_name;
+    } else {
+      update.name = req.user.name || 'Senior User';
     }
 
     const metadata = {
@@ -641,6 +663,7 @@ app.post('/register/senior', ensureAuth, async (req, res) => {
       age,
       city,
       address,
+      is_approved: true, // Seniors are auto-approved
       avatar_emoji: avatarForGender(gender)
     };
     update.avatar_emoji = JSON.stringify(metadata);
@@ -651,9 +674,53 @@ app.post('/register/senior', ensureAuth, async (req, res) => {
       .select()
       .single();
     if (error) throw error;
+
+    // Automatically save senior data to seniors table as well
+    try {
+      const seniorProfile = {
+        user_id: req.user.id,
+        full_name: update.name,
+        age: age ? parseInt(age) : null,
+        gender,
+        city,
+        address,
+        phone: phone || req.user.phone,
+        updated_at: new Date().toISOString()
+      };
+      
+      const { error: seniorErr } = await supabase
+        .from(TABLES.SENIORS)
+        .upsert(seniorProfile, { onConflict: 'user_id' });
+        
+      if (seniorErr) {
+        console.warn(`[WARN] Failed to auto-save to seniors table:`, seniorErr.message);
+        // We don't throw here to avoid failing the whole registration if just the profile table fails
+      } else {
+        console.log(`[INFO] Senior profile automatically saved for ${req.user.id}`);
+      }
+    } catch (err) {
+      console.warn(`[WARN] Unexpected error saving senior profile:`, err.message);
+    }
+
+    // Notify admin of new senior registration
+    try {
+      await supabase.from(TABLES.PENDING_APPROVALS).insert({
+        uid: req.user.id,
+        email: req.user.email,
+        full_name: update.name,
+        phone: phone || req.user.phone || null,
+        role: 'elderly',
+        status: 'approved', // Mark as auto-approved but still notified
+        created_at: new Date().toISOString()
+      });
+      console.log(`[INFO] Senior registration notification created for admin: ${req.user.id}`);
+    } catch (err) {
+      console.warn(`[WARN] Failed to insert into pending_approvals for senior notification:`, err.message);
+    }
+
     res.json({ profile: parseProfileData(data) });
   } catch (e) {
-    console.error(`[ERROR] Registration request failed:`, e);
+    console.error(`[ERROR] Senior registration failed:`, e);
     res.status(500).json({ error: e.message });
   }
 });
@@ -693,15 +760,19 @@ app.post('/register/volunteer', ensureAuth, async (req, res) => {
 
     // Optional: enqueue to pending approvals table if exists
     try {
+      const vName = full_name || name || req.user.name || 'Volunteer Applicant';
       await supabase.from(TABLES.PENDING_APPROVALS).insert({
         uid: req.user.id,
         email: req.user.email,
-        full_name: full_name ?? name ?? null,
-        phone: phone ?? null,
+        full_name: vName,
+        phone: phone || req.user.phone || null,
         role: 'volunteer',
+        status: 'pending',
+        created_at: new Date().toISOString()
       });
+      console.log(`[INFO] Volunteer application notification created for admin: ${req.user.id}`);
     } catch (err) {
-      console.warn(`[WARN] Failed to insert into pending_approvals:`, err.message);
+      console.warn(`[WARN] Failed to insert into pending_approvals for volunteer:`, err.message);
     }
 
     res.json({ profile: parseProfileData(data) });
