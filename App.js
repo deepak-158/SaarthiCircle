@@ -8,6 +8,7 @@ import { AuthNavigator, ElderlyNavigator, CaregiverNavigator, AdminNavigator } f
 import { SplashScreen } from './src/screens/auth';
 import { subscribeToAuthChanges, checkAuth, logout } from './src/services/authService';
 import { ChatProvider } from './src/context/ChatContext';
+import { registerPushToken, getSocket, identify } from './src/services/socketService';
 
 import { colors } from './src/theme';
 
@@ -48,6 +49,24 @@ const App = () => {
       unsubscribeAuth();
     };
   }, []);
+
+  // After auth state is known, register push token and identify socket role
+  useEffect(() => {
+    (async () => {
+      try {
+        if (isAuthenticated && userRole) {
+          await registerPushToken();
+          // Optionally pre-identify; most screens identify as needed
+          try {
+            const profileJson = await AsyncStorage.getItem('userProfile');
+            const profile = profileJson ? JSON.parse(profileJson) : null;
+            const userId = profile?.id || profile?.uid || profile?.userId;
+            if (userId) identify({ userId, role: userRole.toUpperCase() });
+          } catch {}
+        }
+      } catch {}
+    })();
+  }, [isAuthenticated, userRole]);
 
   return (
     <ChatProvider>

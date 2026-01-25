@@ -12,6 +12,8 @@ const VolunteerSessionScreen = ({ navigation }) => {
   const [isOnline, setIsOnline] = useState(false);
   const [userId, setUserId] = useState(null);
   const [pendingSeniorId, setPendingSeniorId] = useState(null);
+  const [pendingRequestType, setPendingRequestType] = useState('chat');
+  const [pendingNote, setPendingNote] = useState('');
   const { activeChats } = useChat();
   const pulseAnim = useRef(new Animated.Value(1)).current;
 
@@ -36,14 +38,20 @@ const VolunteerSessionScreen = ({ navigation }) => {
     });
 
     socket.off('seeker:incoming');
-    socket.on('seeker:incoming', ({ seniorId }) => {
+    socket.on('seeker:incoming', ({ seniorId, requestType = 'chat', note = '' }) => {
       if (!isOnline) return;
       setPendingSeniorId((prev) => prev || seniorId);
+      setPendingRequestType((prev) => prev || requestType);
+      setPendingNote((prev) => prev || note);
     });
 
     socket.off('request:claimed');
     socket.on('request:claimed', ({ seniorId }) => {
-      if (pendingSeniorId === seniorId) setPendingSeniorId(null);
+      if (pendingSeniorId === seniorId) {
+        setPendingSeniorId(null);
+        setPendingRequestType('chat');
+        setPendingNote('');
+      }
     });
 
     return () => {
@@ -101,13 +109,18 @@ const VolunteerSessionScreen = ({ navigation }) => {
               <MaterialCommunityIcons name="radar" size={40} color={colors.primary.main} />
             </Animated.View>
             <Text style={styles.statusText}>
-              {pendingSeniorId ? 'Incoming request...' : 'Waiting for a match...'}
+              {pendingSeniorId ? `Incoming ${pendingRequestType} request...` : 'Waiting for a match...'}
             </Text>
+            {pendingNote ? (
+              <Text style={{ marginTop: spacing.xs, color: colors.neutral.darkGray }}>{pendingNote}</Text>
+            ) : null}
             <ActivityIndicator color={colors.primary.main} style={{ marginTop: spacing.md }} />
             {pendingSeniorId && (
               <TouchableOpacity style={styles.onlineBtn} onPress={handleAccept}>
                 <MaterialCommunityIcons name="check" size={24} color={colors.neutral.white} />
-                <Text style={styles.onlineBtnText}>Accept Request</Text>
+                <Text style={styles.onlineBtnText}>
+                  {pendingRequestType === 'voice' ? 'Accept Voice Call' : pendingRequestType === 'emotional' ? 'Accept Support Request' : 'Accept Chat'}
+                </Text>
               </TouchableOpacity>
             )}
             <TouchableOpacity style={[styles.offlineBtn]} onPress={handleGoOffline}>

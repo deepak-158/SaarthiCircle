@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -56,6 +56,7 @@ const RegisterScreen = ({ navigation, route }) => {
     getStoredData();
   }, [route.params]);
   const [loading, setLoading] = useState(false);
+  const submittingRef = useRef(false);
   const [formData, setFormData] = useState({
     fullName: '',
     age: '',
@@ -93,6 +94,10 @@ const RegisterScreen = ({ navigation, route }) => {
   };
 
   const handleRegister = async () => {
+    // Re-entrancy guard to prevent duplicate submissions (double taps, re-renders)
+    if (loading || submittingRef.current) {
+      return;
+    }
     if (!role) {
       Alert.alert('Required', 'Please select a role');
       return;
@@ -101,6 +106,7 @@ const RegisterScreen = ({ navigation, route }) => {
     if (!validateForm()) return;
 
     setLoading(true);
+    submittingRef.current = true;
     try {
       const payload = {
         email: email.trim(),
@@ -163,6 +169,7 @@ const RegisterScreen = ({ navigation, route }) => {
       Alert.alert('Error', 'Failed to register. Please try again.');
     } finally {
       setLoading(false);
+      submittingRef.current = false;
     }
   };
 

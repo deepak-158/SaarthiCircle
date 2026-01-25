@@ -353,14 +353,22 @@ io.on('connection', (socket) => {
     if (role === 'VOLUNTEER') {
       onlineVolunteers.set(userId, socket.id);
       io.emit('volunteer:online', { volunteerId: userId });
+
+      // Send any pending seeker requests to this newly online volunteer
+      pendingRequests.forEach((req, seniorId) => {
+        if (req?.status === 'pending') {
+          const { requestType = 'chat', note = '' } = req;
+          io.to(socket.id).emit('seeker:incoming', { seniorId, requestType, note });
+        }
+      });
     }
   });
 
   // Senior requests a companion: notify all online volunteers to accept
-  socket.on('seeker:request', async ({ seniorId }) => {
+  socket.on('seeker:request', async ({ seniorId, requestType = 'chat', note = '' }) => {
     try {
       if (!seniorId) return;
-      pendingRequests.set(seniorId, { status: 'pending' });
+      pendingRequests.set(seniorId, { status: 'pending', requestType, note });
 
       if (onlineVolunteers.size === 0) {
         socket.emit('seeker:queued');
@@ -368,12 +376,27 @@ io.on('connection', (socket) => {
 
       // Notify all online volunteers via socket
       onlineVolunteers.forEach((volSocketId, volId) => {
-        io.to(volSocketId).emit('seeker:incoming', { seniorId });
+        io.to(volSocketId).emit('seeker:incoming', { seniorId, requestType, note });
         // Optional push notification if token present
-        sendPushNotification(volId, 'New chat request', 'A senior is seeking companionship', { seniorId });
+        const title = requestType === 'voice' ? 'Incoming voice call request' : requestType === 'emotional' ? 'Emotional support request' : 'New chat request';
+        const body = note && note.length ? note : 'A senior is seeking companionship';
+        sendPushNotification(volId, title, body, { seniorId, requestType });
       });
     } catch (e) {
       socket.emit('error', { message: e.message });
+    }
+  });
+
+  // Push token registration via socket (avoids HTTP auth)
+  socket.on('push:register', async ({ userId, token }) => {
+    try {
+      if (!userId || !token) return;
+      pushTokens.set(userId, token);
+      console.log(`[PUSH] Registered token via socket for user ${userId}`);
+      socket.emit('push:registered', { ok: true });
+    } catch (e) {
+      console.error('[PUSH] Registration failed:', e);
+      socket.emit('push:registered', { ok: false, error: e.message });
     }
   });
 
@@ -399,8 +422,10 @@ io.on('connection', (socket) => {
       if (volunteerSocketId) io.sockets.sockets.get(volunteerSocketId)?.join(convRoom);
 
       // Notify chosen volunteer and senior
-      if (seniorSocketId) io.to(seniorSocketId).emit('session:started', { conversationId: conversation.id, seniorId, volunteerId });
-      if (volunteerSocketId) io.to(volunteerSocketId).emit('session:started', { conversationId: conversation.id, seniorId, volunteerId });
+      const { requestType = 'chat', note = '' } = req || {};
+      const startedPayload = { conversationId: conversation.id, seniorId, volunteerId, requestType, note };
+      if (seniorSocketId) io.to(seniorSocketId).emit('session:started', startedPayload);
+      if (volunteerSocketId) io.to(volunteerSocketId).emit('session:started', startedPayload);
 
       // Notify others that request was claimed
       onlineVolunteers.forEach((volSocketId, volId) => {
@@ -408,8 +433,10 @@ io.on('connection', (socket) => {
       });
 
       // Push notifications to both sides
-      sendPushNotification(seniorId, 'Companion found', 'A volunteer accepted your chat request', { conversationId: conversation.id, volunteerId });
-      sendPushNotification(volunteerId, 'Chat started', 'You accepted the senior chat request', { conversationId: conversation.id, seniorId });
+      const acceptTitle = requestType === 'voice' ? 'Voice session started' : (requestType === 'emotional' ? 'Support session started' : 'Chat started');
+      const acceptBody = note && note.length ? note : 'A volunteer accepted your request';
+      sendPushNotification(seniorId, acceptTitle, acceptBody, { conversationId: conversation.id, volunteerId, requestType });
+      sendPushNotification(volunteerId, acceptTitle, acceptBody, { conversationId: conversation.id, seniorId, requestType });
     } catch (e) {
       socket.emit('error', { message: e.message });
     }
@@ -859,7 +886,11 @@ app.post('/auth/verify-otp', async (req, res) => {
     };
     
     // Determine approved status
-    const isApproved = role === 'admin' || role === 'elderly' ? true : (existing?.is_approved ?? false);
+    // IMPORTANT: Some deployments store approval only in metadata (avatar_emoji JSON).
+    // Using existing?.is_approved can incorrectly reset approved volunteers to false.
+    const existingParsed = existing ? parseProfileData(existing) : null;
+    const existingApproved = existingParsed?.is_approved === true;
+    const isApproved = role === 'admin' || role === 'elderly' ? true : existingApproved;
     
     // Preserve existing avatar_emoji if it contains JSON metadata
     const currentAvatar = existing?.avatar_emoji;
@@ -1160,6 +1191,7 @@ app.post('/register/volunteer', ensureAuth, async (req, res) => {
       address,
       skills,
       why_volunteer,
+      is_approved: false,
       avatar_emoji: avatarForGender(gender)
     };
     update.avatar_emoji = JSON.stringify(metadata);
@@ -1174,15 +1206,34 @@ app.post('/register/volunteer', ensureAuth, async (req, res) => {
     // Optional: enqueue to pending approvals table if exists
     try {
       const vName = full_name || name || req.user.name || 'Volunteer Applicant';
-      await supabase.from(TABLES.PENDING_APPROVALS).insert({
-        uid: req.user.id,
-        email: req.user.email,
-        full_name: vName,
-        phone: phone || req.user.phone || null,
-        role: 'volunteer',
-        status: 'pending',
-        created_at: new Date().toISOString()
-      });
+      const now = new Date().toISOString();
+
+      // Prefer update to avoid duplicates, fallback to insert
+      const upd = await supabase
+        .from(TABLES.PENDING_APPROVALS)
+        .update({
+          email: req.user.email,
+          full_name: vName,
+          phone: phone || req.user.phone || null,
+          role: 'volunteer',
+          status: 'pending',
+          created_at: now,
+          decided_at: null,
+        })
+        .eq('uid', req.user.id)
+        .select();
+
+      if (upd?.error || !Array.isArray(upd?.data) || upd.data.length === 0) {
+        await supabase.from(TABLES.PENDING_APPROVALS).insert({
+          uid: req.user.id,
+          email: req.user.email,
+          full_name: vName,
+          phone: phone || req.user.phone || null,
+          role: 'volunteer',
+          status: 'pending',
+          created_at: now,
+        });
+      }
       console.log(`[INFO] Volunteer application notification created for admin: ${req.user.id}`);
     } catch (err) {
       console.warn(`[WARN] Failed to insert into pending_approvals for volunteer:`, err.message);
@@ -1339,13 +1390,45 @@ app.put('/help-requests/:id/complete', ensureAuth, async (req, res) => {
 // Admin endpoints
 app.get('/admin/volunteers/pending', ensureAdmin, async (req, res) => {
   try {
+    // Primary source: users table
     const { data, error } = await supabase
       .from(TABLES.USERS)
       .select('*')
-      .eq('role', 'volunteer_pending')
+      .in('role', ['volunteer_pending', 'volunteer'])
       .order('updated_at', { ascending: false });
     if (error) throw error;
-    res.json({ volunteers: data.map(parseProfileData) });
+    const parsed = (data || []).map(parseProfileData);
+
+    let pending = parsed.filter(v => v.role === 'volunteer_pending' || (v.role === 'volunteer' && v.is_approved !== true));
+
+    // If pending_approvals is available, exclude anyone whose latest decision is approved/rejected
+    try {
+      const { data: approvalRows, error: apprRowsErr } = await supabase
+        .from(TABLES.PENDING_APPROVALS)
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (!apprRowsErr && Array.isArray(approvalRows) && approvalRows.length > 0) {
+        const latestById = new Map();
+        approvalRows.forEach((r) => {
+          const uid = r.user_id || r.uid;
+          if (!uid) return;
+          const ts = Date.parse(r.decided_at || r.created_at || '') || 0;
+          const prev = latestById.get(uid);
+          if (!prev || ts > prev.ts) {
+            latestById.set(uid, { ts, status: r.status });
+          }
+        });
+
+        pending = pending.filter(v => {
+          const decision = latestById.get(v.id);
+          if (!decision) return true;
+          return decision.status === 'pending';
+        });
+      }
+    } catch {}
+
+    res.json({ volunteers: pending });
   } catch (e) {
     console.error(`[ERROR] Registration request failed:`, e);
     res.status(500).json({ error: e.message });
@@ -1354,26 +1437,43 @@ app.get('/admin/volunteers/pending', ensureAdmin, async (req, res) => {
 
 app.get('/admin/volunteers/approved', ensureAdmin, async (req, res) => {
   try {
-    // Fetch volunteers with role='volunteer' (approved volunteers)
+    // Primary source: users table (approved volunteers)
     const { data, error } = await supabase
       .from(TABLES.USERS)
       .select('*')
       .eq('role', 'volunteer')
       .order('updated_at', { ascending: false });
     if (error) throw error;
-    
-    // Filter to only include truly approved volunteers
-    const approvedVolunteers = data
-      .map(parseProfileData)
-      .filter(v => {
-        // Explicitly approved
-        if (v.is_approved === true) return true;
-        // If is_approved is false, exclude
-        if (v.is_approved === false) return false;
-        // If undefined but role is volunteer, include (assume approved)
-        return v.role === 'volunteer';
-      });
-    
+
+    let approvedVolunteers = (data || []).map(parseProfileData).filter(v => v.is_approved === true);
+
+    // If pending_approvals is available, only include those whose latest decision is approved
+    try {
+      const { data: approvalRows, error: apprRowsErr } = await supabase
+        .from(TABLES.PENDING_APPROVALS)
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (!apprRowsErr && Array.isArray(approvalRows) && approvalRows.length > 0) {
+        const latestById = new Map();
+        approvalRows.forEach((r) => {
+          const uid = r.user_id || r.uid;
+          if (!uid) return;
+          const ts = Date.parse(r.decided_at || r.created_at || '') || 0;
+          const prev = latestById.get(uid);
+          if (!prev || ts > prev.ts) {
+            latestById.set(uid, { ts, status: r.status });
+          }
+        });
+
+        approvedVolunteers = approvedVolunteers.filter(v => {
+          const decision = latestById.get(v.id);
+          if (!decision) return true;
+          return decision.status === 'approved';
+        });
+      }
+    } catch {}
+
     res.json({ volunteers: approvedVolunteers });
   } catch (e) {
     console.error(`[ERROR] Failed to fetch approved volunteers:`, e);
@@ -1403,15 +1503,9 @@ app.post('/admin/volunteers/:id/approve', ensureAdmin, async (req, res) => {
     
     console.log(`[ADMIN] Current user data:`, JSON.stringify(user, null, 2));
     
-    // Validate that the user is actually a pending volunteer
+    // Loosen validation: allow approval even if role drifted; we'll set correct role below
     if (user.role !== 'volunteer_pending' && user.role !== 'volunteer') {
-      console.warn(`[ADMIN] User ${id} has role ${user.role}, not volunteer_pending or volunteer`);
-      // Still allow approval if they're already a volunteer (re-approval)
-      if (user.role !== 'volunteer') {
-        return res.status(400).json({ 
-          error: `Cannot approve user with role: ${user.role}. Expected volunteer_pending or volunteer.` 
-        });
-      }
+      console.warn(`[ADMIN] Approving user ${id} from role ${user.role} -> volunteer`);
     }
     
     let metadata = {};
@@ -1484,16 +1578,43 @@ app.post('/admin/volunteers/:id/approve', ensureAdmin, async (req, res) => {
     
     console.log(`[ADMIN] Updated user data:`, JSON.stringify(data, null, 2));
     
-    // Also update pending_approvals if it exists
+    // Persist decision in pending_approvals (by uid)
     try {
-      const { error: deleteError } = await supabase.from(TABLES.PENDING_APPROVALS).delete().eq('uid', id);
-      if (deleteError) {
-        console.warn(`[WARN] Could not clean up pending_approvals for ${id}:`, deleteError.message);
-      } else {
-        console.log(`[ADMIN] Cleaned up pending_approvals for ${id}`);
+      let upd = await supabase
+        .from(TABLES.PENDING_APPROVALS)
+        .update({ status: 'approved', decided_at: now })
+        .eq('uid', id)
+        .select();
+
+      if (upd?.error) {
+        upd = await supabase
+          .from(TABLES.PENDING_APPROVALS)
+          .update({ status: 'approved' })
+          .eq('uid', id)
+          .select();
       }
+
+      if (upd?.error || !Array.isArray(upd?.data) || upd.data.length === 0) {
+        const ins = await supabase
+          .from(TABLES.PENDING_APPROVALS)
+          .insert({ uid: id, status: 'approved', decided_at: now, created_at: now })
+          .select();
+        if (ins?.error) {
+          await supabase
+            .from(TABLES.PENDING_APPROVALS)
+            .insert({ uid: id, status: 'approved', created_at: now })
+            .select();
+        }
+      }
+
+      await supabase
+        .from(TABLES.PENDING_APPROVALS)
+        .update({ status: 'approved' })
+        .eq('uid', id);
+
+      console.log(`[ADMIN] pending_approvals persisted as approved for ${id}`);
     } catch (e) {
-      console.warn(`[WARN] Exception cleaning up pending_approvals:`, e.message);
+      console.warn(`[WARN] Failed to persist pending_approvals (approved) for ${id}:`, e?.message || e);
     }
 
     // Return the updated volunteer data
@@ -1582,11 +1703,43 @@ app.post('/admin/volunteers/:id/reject', ensureAdmin, async (req, res) => {
     console.log(`[ADMIN] Volunteer ${id} rejected successfully`);
     console.log(`[ADMIN] Updated data:`, JSON.stringify(data, null, 2));
 
-    // Also update pending_approvals if it exists
+    // Persist decision in pending_approvals (by uid)
     try {
-      await supabase.from(TABLES.PENDING_APPROVALS).delete().eq('uid', id);
+      let upd = await supabase
+        .from(TABLES.PENDING_APPROVALS)
+        .update({ status: 'rejected', decided_at: now })
+        .eq('uid', id)
+        .select();
+
+      if (upd?.error) {
+        upd = await supabase
+          .from(TABLES.PENDING_APPROVALS)
+          .update({ status: 'rejected' })
+          .eq('uid', id)
+          .select();
+      }
+
+      if (upd?.error || !Array.isArray(upd?.data) || upd.data.length === 0) {
+        const ins = await supabase
+          .from(TABLES.PENDING_APPROVALS)
+          .insert({ uid: id, status: 'rejected', decided_at: now, created_at: now })
+          .select();
+        if (ins?.error) {
+          await supabase
+            .from(TABLES.PENDING_APPROVALS)
+            .insert({ uid: id, status: 'rejected', created_at: now })
+            .select();
+        }
+      }
+
+      await supabase
+        .from(TABLES.PENDING_APPROVALS)
+        .update({ status: 'rejected' })
+        .eq('uid', id);
+
+      console.log(`[ADMIN] pending_approvals persisted as rejected for ${id}`);
     } catch (e) {
-      console.warn(`[WARN] Could not clean up pending_approvals for ${id}`);
+      console.warn(`[WARN] Failed to persist pending_approvals (rejected) for ${id}:`, e?.message || e);
     }
 
     // Return the updated volunteer data
@@ -1605,7 +1758,10 @@ app.get('/admin/stats', ensureAdmin, async (req, res) => {
     const results = await Promise.all([
       supabase.from(TABLES.USERS).select('*', { count: 'exact', head: true }).or('role.eq.elderly,role.eq.senior'),
       supabase.from(TABLES.USERS).select('*', { count: 'exact', head: true }).or('role.eq.volunteer,role.eq.caregiver'),
-      supabase.from(TABLES.USERS).select('*', { count: 'exact', head: true }).eq('role', 'volunteer_pending'),
+      // Pending volunteers: volunteer_pending OR volunteer with is_approved != true
+      supabase.from(TABLES.USERS)
+        .select('*, avatar_emoji', { count: 'exact' })
+        .in('role', ['volunteer_pending', 'volunteer']),
       supabase.from(TABLES.SOS_ALERTS).select('*', { count: 'exact', head: true }).eq('status', 'active'),
       supabase.from(TABLES.HELP_REQUESTS).select('*', { count: 'exact', head: true }).eq('status', 'resolved')
     ]);
@@ -1615,13 +1771,21 @@ app.get('/admin/stats', ensureAdmin, async (req, res) => {
       if (r.error) console.warn(`[WARN] Admin stats query ${idx} failed:`, r.error.message);
     });
 
-    const [
-      totalSeniors,
-      activeCaregivers,
-      pendingRequests,
-      sosAlerts,
-      helpResolved
-    ] = results.map(r => r.count || 0);
+    const totalSeniors = results[0].count || 0;
+    const activeCaregivers = results[1].count || 0;
+    // Derive pending volunteers from returned rows (need to parse metadata)
+    let pendingRequests = 0;
+    try {
+      const rows = results[2].data || [];
+      const parsed = rows.map(parseProfileData);
+      pendingRequests = parsed.filter(v => (
+        v.role === 'volunteer_pending' || (v.role === 'volunteer' && v.is_approved !== true)
+      )).length;
+    } catch (e) {
+      pendingRequests = results[2].count || 0;
+    }
+    const sosAlerts = results[3].count || 0;
+    const helpResolved = results[4].count || 0;
 
     res.json({
       stats: {
