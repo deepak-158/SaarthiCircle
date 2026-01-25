@@ -23,6 +23,11 @@ export const colors = {
     red: '#E53935',        // Emergency/SOS
     yellow: '#FFD54F',     // Warning
   },
+  // Danger Colors (alias around accent.red for compatibility)
+  danger: {
+    light: '#FFEBEE',      // Light red background
+    main: '#E53935',       // Same as accent.red
+  },
   
   // Neutral Colors
   neutral: {

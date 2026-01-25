@@ -9,6 +9,7 @@ import {
   HomeScreen,
   CompanionMatchingScreen,
   ChatScreen,
+  VoiceCallScreen,
   HelpCategoriesScreen,
   VoiceHelpInputScreen,
   HelpProcessingScreen,
@@ -117,6 +118,14 @@ const ElderlyNavigator = () => {
       <Stack.Screen name="ElderlyMain" component={ElderlyMainScreen} />
       <Stack.Screen name="CompanionMatching" component={CompanionMatchingScreen} />
       <Stack.Screen name="Chat" component={ChatScreen} />
+      <Stack.Screen 
+        name="VoiceCall" 
+        component={VoiceCallScreen}
+        options={{
+          animation: 'slide_from_bottom',
+          presentation: 'fullScreenModal',
+        }}
+      />
       <Stack.Screen name="HelpCategories" component={HelpCategoriesScreen} />
       <Stack.Screen name="VoiceHelpInput" component={VoiceHelpInputScreen} />
       <Stack.Screen name="HelpProcessing" component={HelpProcessingScreen} />

@@ -38,10 +38,12 @@ const ChatScreen = ({ navigation, route }) => {
   
   const [messages, setMessages] = useState([]);
   const [inputText, setInputText] = useState('');
+  const [isSending, setIsSending] = useState(false);
   const [isCallActive, setIsCallActive] = useState(mode === 'voice');
   const [callDuration, setCallDuration] = useState(0);
   const [isListening, setIsListening] = useState(false);
   const [currentUserId, setCurrentUserId] = useState(null);
+  const [userProfile, setUserProfile] = useState(null);
   
   const scrollViewRef = useRef();
   const callTimerRef = useRef(null);
@@ -75,7 +77,10 @@ const ChatScreen = ({ navigation, route }) => {
         const profileJson = await AsyncStorage.getItem('userProfile');
         const profile = profileJson ? JSON.parse(profileJson) : null;
         const uid = profile?.id || profile?.uid || profile?.userId;
-        if (mounted) setCurrentUserId(uid);
+        if (mounted) {
+          setCurrentUserId(uid);
+          setUserProfile(profile);
+        }
       } catch {}
     })();
     return () => {
@@ -128,10 +133,25 @@ const ChatScreen = ({ navigation, route }) => {
 
       const normalized = normalizeMessage(m);
       setMessages((prev) => {
-        // Prevent duplicates
+        // Prevent duplicates by ID
         if (prev.some(msg => msg.id === normalized.id)) {
           return prev;
         }
+
+        // Check if this is a message we sent optimistically
+        if (normalized.sender === 'user') {
+          const localMatchIndex = prev.findIndex(
+            msg => msg.id.startsWith('local-') && msg.text === normalized.text
+          );
+          
+          if (localMatchIndex !== -1) {
+            // Replace the local optimistic message with the real one from server
+            const updated = [...prev];
+            updated[localMatchIndex] = normalized;
+            return updated;
+          }
+        }
+        
         return [...prev, normalized];
       });
 
@@ -222,8 +242,9 @@ const ChatScreen = ({ navigation, route }) => {
   };
 
   const handleSendMessage = () => {
-    if (!inputText.trim()) return;
+    if (!inputText.trim() || isSending) return;
 
+    setIsSending(true);
     const optimistic = {
       id: `local-${Date.now()}`,
       text: inputText,
@@ -244,10 +265,15 @@ const ChatScreen = ({ navigation, route }) => {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ senderId: currentUserId || 'USER', content: toSend, type: 'text' }),
-
           });
-        } catch {}
+        } catch (e) {
+          console.error('Error sending message:', e);
+        } finally {
+          setIsSending(false);
+        }
       })();
+    } else {
+      setIsSending(false);
     }
   };
 
@@ -282,6 +308,33 @@ const ChatScreen = ({ navigation, route }) => {
 
     setMessages([]);
     navigation.goBack();
+  };
+
+  const handleStartVoiceCall = () => {
+    if (!conversationId || !companion || !currentUserId) {
+      console.error('Missing conversation data for voice call');
+      return;
+    }
+
+    // Navigate to VoiceCallScreen
+    navigation.navigate('VoiceCall', {
+      conversationId,
+      companion,
+      callerId: currentUserId,
+      calleeId: companion.id,
+      isIncoming: false,
+    });
+
+    // Emit socket event to initiate call
+    const socket = getSocket();
+    if (socket) {
+      socketService.initiateVoiceCall({
+        conversationId,
+        callerId: currentUserId,
+        calleeId: companion.id,
+        callerName: userProfile?.fullName || 'Senior User',
+      });
+    }
   };
 
   const handleEndCall = () => {
@@ -414,7 +467,7 @@ const ChatScreen = ({ navigation, route }) => {
           <View style={styles.headerButtons}>
             <TouchableOpacity 
               style={styles.callButton}
-              onPress={() => setIsCallActive(true)}
+              onPress={handleStartVoiceCall}
             >
               <MaterialCommunityIcons
                 name="phone"
@@ -505,15 +558,15 @@ const ChatScreen = ({ navigation, route }) => {
           <TouchableOpacity
             style={[
               styles.sendButton,
-              !inputText.trim() && styles.sendButtonDisabled,
+              (!inputText.trim() || isSending) && styles.sendButtonDisabled,
             ]}
             onPress={handleSendMessage}
-            disabled={!inputText.trim()}
+            disabled={!inputText.trim() || isSending}
           >
             <MaterialCommunityIcons
               name="send"
               size={28}
-              color={inputText.trim() ? colors.neutral.white : colors.neutral.darkGray}
+              color={inputText.trim() && !isSending ? colors.neutral.white : colors.neutral.darkGray}
             />
           </TouchableOpacity>
         </View>

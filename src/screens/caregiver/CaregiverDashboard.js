@@ -15,6 +15,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { colors, typography, spacing, borderRadius, shadows } from '../../theme';
+import useIncomingCallListener from '../../hooks/useIncomingCallListener';
 // Firebase imports removed - feature being migrated to centralized backend
 
 // Dummy/fallback requests data
@@ -101,6 +102,9 @@ const CaregiverDashboard = ({ navigation }) => {
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState('pending');
   const [volunteerProfile, setVolunteerProfile] = useState(null);
+
+  // Listen for incoming calls
+  useIncomingCallListener();
 
   useEffect(() => {
     loadDashboardData();

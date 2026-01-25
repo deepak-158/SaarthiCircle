@@ -472,6 +472,159 @@ io.on('connection', (socket) => {
     socket.to(`conv:${conversationId}`).emit('webrtc:ice-candidate', { candidate });
   });
 
+  // Voice call handlers
+  socket.on('call:initiate', async ({ conversationId, callerId, calleeId, callerName }) => {
+    try {
+      if (!conversationId || !callerId || !calleeId) {
+        return socket.emit('error', { message: 'conversationId, callerId, and calleeId required' });
+      }
+      console.log(`[CALL] Initiate call from ${callerId} to ${calleeId} in conversation ${conversationId}`);
+
+      // Get the specific volunteer's socket
+      const calleeSocketId = userSockets.get(calleeId);
+      if (!calleeSocketId) {
+        return socket.emit('call:failed', { 
+          conversationId, 
+          reason: 'Volunteer not available',
+          message: 'The volunteer is currently offline. Please try again later.'
+        });
+      }
+
+      // Join caller to conversation room
+      socket.join(`conv:${conversationId}`);
+
+      // Send incoming call notification to the specific volunteer only
+      io.to(calleeSocketId).emit('call:incoming', {
+        conversationId,
+        callerId,
+        callerName: callerName || 'Senior User',
+        calleeId,
+      });
+
+      // Notify caller that call is ringing
+      socket.emit('call:ringing', {
+        conversationId,
+        calleeId,
+      });
+
+      console.log(`[CALL] Incoming call notification sent to volunteer ${calleeId}`);
+
+      // Send push notification to volunteer
+      sendPushNotification(calleeId, 'Incoming Call', `${callerName || 'A senior'} is calling you`, { 
+        conversationId,
+        callerId,
+        type: 'voice_call'
+      });
+
+    } catch (e) {
+      console.error(`[CALL] Error initiating call:`, e);
+      socket.emit('error', { message: e.message });
+    }
+  });
+
+  // Volunteer accepts the call
+  socket.on('call:accept', async ({ conversationId, callerId, calleeId }) => {
+    try {
+      if (!conversationId || !callerId || !calleeId) {
+        return socket.emit('error', { message: 'conversationId, callerId, and calleeId required' });
+      }
+      console.log(`[CALL] Call accepted by ${calleeId} in conversation ${conversationId}`);
+
+      // Join volunteer to conversation room
+      socket.join(`conv:${conversationId}`);
+
+      // Get caller's socket
+      const callerSocketId = userSockets.get(callerId);
+
+      // Notify both parties that call is active
+      if (callerSocketId) {
+        io.to(callerSocketId).emit('call:active', {
+          conversationId,
+          callerId,
+          calleeId,
+          acceptedAt: new Date().toISOString(),
+        });
+      }
+
+      // Notify the volunteer that call is active
+      socket.emit('call:active', {
+        conversationId,
+        callerId,
+        calleeId,
+        acceptedAt: new Date().toISOString(),
+      });
+
+      // Broadcast to both that they can start WebRTC connection
+      io.to(`conv:${conversationId}`).emit('call:ready-for-webrtc', {
+        conversationId,
+        callerId,
+        calleeId,
+      });
+
+      console.log(`[CALL] Call is now active between ${callerId} and ${calleeId}`);
+    } catch (e) {
+      console.error(`[CALL] Error accepting call:`, e);
+      socket.emit('error', { message: e.message });
+    }
+  });
+
+  // Volunteer rejects the call
+  socket.on('call:reject', async ({ conversationId, callerId, calleeId }) => {
+    try {
+      if (!conversationId || !callerId || !calleeId) {
+        return socket.emit('error', { message: 'conversationId, callerId, and calleeId required' });
+      }
+      console.log(`[CALL] Call rejected by ${calleeId} in conversation ${conversationId}`);
+
+      const callerSocketId = userSockets.get(callerId);
+      if (callerSocketId) {
+        io.to(callerSocketId).emit('call:rejected', {
+          conversationId,
+          rejectedBy: calleeId,
+          reason: 'Volunteer rejected the call',
+        });
+      }
+
+      console.log(`[CALL] Call rejected notification sent to caller ${callerId}`);
+    } catch (e) {
+      console.error(`[CALL] Error rejecting call:`, e);
+      socket.emit('error', { message: e.message });
+    }
+  });
+
+  // End voice call
+  socket.on('call:end', async ({ conversationId, callerId, calleeId, userId }) => {
+    try {
+      if (!conversationId || !userId) {
+        return socket.emit('error', { message: 'conversationId and userId required' });
+      }
+      console.log(`[CALL] Call ended in conversation ${conversationId} by ${userId}`);
+
+      // Notify both parties that call has ended
+      io.to(`conv:${conversationId}`).emit('call:ended', {
+        conversationId,
+        endedBy: userId,
+        endedAt: new Date().toISOString(),
+      });
+
+      // Remove both from conversation room (they can rejoin for chat)
+      const callerSocketId = userSockets.get(callerId);
+      const calleeSocketId = userSockets.get(calleeId);
+
+      if (callerSocketId) {
+        io.sockets.sockets.get(callerSocketId)?.leave(`conv:${conversationId}`);
+      }
+      if (calleeSocketId) {
+        io.sockets.sockets.get(calleeSocketId)?.leave(`conv:${conversationId}`);
+      }
+
+      console.log(`[CALL] Call ended and participants removed from conversation room`);
+    } catch (e) {
+      console.error(`[CALL] Error ending call:`, e);
+      socket.emit('error', { message: e.message });
+    }
+  });
+
   socket.on('disconnect', () => {
     if (socket.data?.role === 'VOLUNTEER' && socket.data?.userId) {
       onlineVolunteers.delete(socket.data.userId);

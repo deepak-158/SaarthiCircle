@@ -7,6 +7,16 @@ export const ChatProvider = ({ children }) => {
   const [activeSession, setActiveSession] = useState(null);
   const [isCallActive, setIsCallActive] = useState(false);
   const [callDuration, setCallDuration] = useState(0);
+  // Voice call state management
+  const [voiceCallState, setVoiceCallState] = useState({
+    status: null, // 'initiating', 'ringing', 'active', 'ended'
+    conversationId: null,
+    callerId: null,
+    calleeId: null,
+    startTime: null,
+    duration: 0,
+  });
+  const [incomingCall, setIncomingCall] = useState(null); // { from, callerId, conversationId }
   // Map of all active chats: conversationId -> { conversationId, companion, isActive, lastMessage, timestamp }
   const [activeChats, setActiveChats] = useState(new Map());
 
@@ -130,6 +140,63 @@ export const ChatProvider = ({ children }) => {
     setIsCallActive(active);
   };
 
+  // Voice call management functions
+  const initiateVoiceCall = (conversationId, callerId, calleeId) => {
+    setVoiceCallState({
+      status: 'initiating',
+      conversationId,
+      callerId,
+      calleeId,
+      startTime: null,
+      duration: 0,
+    });
+  };
+
+  const setCallRinging = (conversationId, callerId, calleeId) => {
+    setVoiceCallState({
+      status: 'ringing',
+      conversationId,
+      callerId,
+      calleeId,
+      startTime: null,
+      duration: 0,
+    });
+  };
+
+  const setCallActive = (conversationId, callerId, calleeId) => {
+    setVoiceCallState({
+      status: 'active',
+      conversationId,
+      callerId,
+      calleeId,
+      startTime: Date.now(),
+      duration: 0,
+    });
+  };
+
+  const updateCallDuration = (duration) => {
+    setVoiceCallState(prev => ({ ...prev, duration }));
+  };
+
+  const endVoiceCall = () => {
+    setVoiceCallState({
+      status: 'ended',
+      conversationId: null,
+      callerId: null,
+      calleeId: null,
+      startTime: null,
+      duration: 0,
+    });
+  };
+
+  const setIncomingCallNotification = (from, callerId, conversationId) => {
+    setIncomingCall({ from, callerId, conversationId });
+  };
+
+  const clearIncomingCall = () => {
+    setIncomingCall(null);
+  };
+
   return (
     <ChatContext.Provider
       value={{
@@ -145,6 +212,16 @@ export const ChatProvider = ({ children }) => {
         removeActiveChat,
         updateActiveChatMessage,
         getActiveChatsList,
+        // Voice call methods
+        voiceCallState,
+        initiateVoiceCall,
+        setCallRinging,
+        setCallActive,
+        updateCallDuration,
+        endVoiceCall,
+        incomingCall,
+        setIncomingCallNotification,
+        clearIncomingCall,
       }}
     >
       {children}

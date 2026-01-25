@@ -2,6 +2,7 @@
 export { default as HomeScreen } from './HomeScreen';
 export { default as CompanionMatchingScreen } from './CompanionMatchingScreen';
 export { default as ChatScreen } from './ChatScreen';
+export { default as VoiceCallScreen } from './VoiceCallScreen';
 export { default as HelpCategoriesScreen } from './HelpCategoriesScreen';
 export { default as VoiceHelpInputScreen } from './VoiceHelpInputScreen';
 export { default as HelpProcessingScreen } from './HelpProcessingScreen';

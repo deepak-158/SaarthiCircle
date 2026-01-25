@@ -6,3 +6,5 @@ export { default as MoodSelector } from './MoodSelector';
 export { default as AccessibleInput } from './AccessibleInput';
 export { default as ActiveSessionOverlay } from './ActiveSessionOverlay';
 export { default as ActiveChatOverlay } from './ActiveChatOverlay';
+export { default as IncomingCallOverlay } from './IncomingCallOverlay';
+export { default as ActiveCallOverlay } from './ActiveCallOverlay';

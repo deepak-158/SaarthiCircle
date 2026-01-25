@@ -11,9 +11,11 @@ import {
   TouchableOpacity,
   Alert,
   Linking,
+  Platform,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import * as Clipboard from 'expo-clipboard';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LargeButton, LargeCard, ActiveChatOverlay } from '../../components/common';
 import { colors, typography, spacing, borderRadius, shadows } from '../../theme';
@@ -282,17 +284,44 @@ const CompanionMatchingScreen = ({ navigation }) => {
   };
 
   // Quick Emergency Call
-  const handleQuickEmergencyCall = (type) => {
+  const handleQuickEmergencyCall = async (type) => {
     const number = EMERGENCY_CONTACTS[type];
+    if (!number) {
+      Alert.alert('Unavailable', 'Emergency number not configured.');
+      return;
+    }
+
+    const telUrl = `tel:${number}`;
+    const telPromptUrl = `telprompt:${number}`;
+
     Alert.alert(
       'Emergency Call',
       `Call ${type.replace('_', ' ').toUpperCase()} (${number})?`,
       [
         { text: 'Cancel', style: 'cancel' },
-        { 
-          text: 'Call Now', 
+        {
+          text: 'Call Now',
           style: 'destructive',
-          onPress: () => Linking.openURL(`tel:${number}`)
+          onPress: async () => {
+            try {
+              await Linking.openURL(telUrl);
+              return;
+            } catch (e1) {
+              try {
+                await Linking.openURL(telPromptUrl);
+                return;
+              } catch (e2) {
+                try {
+                  await Clipboard.setStringAsync(number);
+                } catch {}
+                const reason = e2?.message || e1?.message || 'Dialer not available on this device/simulator.';
+                Alert.alert(
+                  'Unable to place call',
+                  `Please dial ${number} manually on your phone.\n\nThe number has been copied to your clipboard.\nReason: ${reason}`
+                );
+              }
+            }
+          },
         },
       ]
     );
