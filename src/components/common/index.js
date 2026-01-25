@@ -8,3 +8,4 @@ export { default as ActiveSessionOverlay } from './ActiveSessionOverlay';
 export { default as ActiveChatOverlay } from './ActiveChatOverlay';
 export { default as IncomingCallOverlay } from './IncomingCallOverlay';
 export { default as ActiveCallOverlay } from './ActiveCallOverlay';
+export { default as ActiveRequestOverlay } from './ActiveRequestOverlay';

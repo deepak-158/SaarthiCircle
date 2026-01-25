@@ -16,6 +16,11 @@ const VolunteerSessionScreen = ({ navigation }) => {
   const [pendingNote, setPendingNote] = useState('');
   const { activeChats } = useChat();
   const pulseAnim = useRef(new Animated.Value(1)).current;
+  const isOnlineRef = useRef(false);
+
+  useEffect(() => {
+    isOnlineRef.current = isOnline;
+  }, [isOnline]);
 
   useEffect(() => {
     (async () => {
@@ -33,13 +38,13 @@ const VolunteerSessionScreen = ({ navigation }) => {
 
     socket.off('session:started');
     socket.on('session:started', ({ conversationId, seniorId, volunteerId }) => {
-      if (!isOnline) return;
+      if (!isOnlineRef.current) return;
       navigation.navigate('Chat', { mode: 'text', companion: { id: seniorId, isReal: true }, conversationId });
     });
 
     socket.off('seeker:incoming');
     socket.on('seeker:incoming', ({ seniorId, requestType = 'chat', note = '' }) => {
-      if (!isOnline) return;
+      if (!isOnlineRef.current) return;
       setPendingSeniorId((prev) => prev || seniorId);
       setPendingRequestType((prev) => prev || requestType);
       setPendingNote((prev) => prev || note);
@@ -74,8 +79,9 @@ const VolunteerSessionScreen = ({ navigation }) => {
 
   const handleGoOnline = () => {
     if (!userId) return;
-    identify({ userId, role: 'VOLUNTEER' });
+    isOnlineRef.current = true;
     setIsOnline(true);
+    identify({ userId, role: 'VOLUNTEER' });
   };
 
   const handleGoOffline = () => {

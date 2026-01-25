@@ -76,6 +76,83 @@ const createConversation = async (seniorId, volunteerId) => {
   return data; // contains id
 };
 
+const isVolunteerBusy = (volunteerId) => {
+  for (const session of sessions.values()) {
+    if (session?.volunteerId === volunteerId) return true;
+  }
+  return false;
+};
+
+const startSession = async ({ seniorId, volunteerId, req }) => {
+  const existing = pendingRequests.get(seniorId);
+  if (!existing || existing.status !== 'pending') return null;
+
+  pendingRequests.set(seniorId, {
+    status: 'claimed',
+    volunteerId,
+    requestType: existing.requestType,
+    note: existing.note,
+  });
+
+  try {
+    const conversation = await createConversation(seniorId, volunteerId);
+    const convRoom = `conv:${conversation.id}`;
+    sessions.set(conversation.id, { seniorId, volunteerId });
+
+    const seniorSocketId = userSockets.get(seniorId);
+    const volunteerSocketId = userSockets.get(volunteerId) || onlineVolunteers.get(volunteerId);
+    if (seniorSocketId) io.sockets.sockets.get(seniorSocketId)?.join(convRoom);
+    if (volunteerSocketId) io.sockets.sockets.get(volunteerSocketId)?.join(convRoom);
+
+    const { requestType = 'chat', note = '' } = req || existing || {};
+    const startedPayload = { conversationId: conversation.id, seniorId, volunteerId, requestType, note };
+    if (seniorSocketId) io.to(seniorSocketId).emit('session:started', startedPayload);
+    if (volunteerSocketId) io.to(volunteerSocketId).emit('session:started', startedPayload);
+
+    try {
+      await supabase.from(TABLES.HELP_REQUESTS).insert({
+        senior_id: seniorId,
+        volunteer_id: volunteerId,
+        conversation_id: conversation.id,
+        type: requestType,
+        status: 'accepted',
+        notes: note,
+        created_at: new Date().toISOString(),
+        accepted_at: new Date().toISOString(),
+      });
+      console.log(`[REQUEST] Stored help request in database for ${seniorId} accepted by ${volunteerId}`);
+    } catch (dbError) {
+      console.warn(`[REQUEST] Failed to store request in DB:`, dbError);
+    }
+
+    onlineVolunteers.forEach((volSocketId, volId) => {
+      if (volId !== volunteerId) io.to(volSocketId).emit('request:claimed', { seniorId, volunteerId });
+    });
+
+    const acceptTitle = requestType === 'voice' ? 'Voice session started' : (requestType === 'emotional' ? 'Support session started' : 'Chat started');
+    const acceptBody = note && note.length ? note : 'A volunteer accepted your request';
+    sendPushNotification(seniorId, acceptTitle, acceptBody, { conversationId: conversation.id, volunteerId, requestType });
+    sendPushNotification(volunteerId, acceptTitle, acceptBody, { conversationId: conversation.id, seniorId, requestType });
+
+    return conversation;
+  } catch (e) {
+    pendingRequests.set(seniorId, existing);
+    throw e;
+  }
+};
+
+const claimFirstPendingChatForVolunteer = async ({ volunteerId }) => {
+  if (!volunteerId) return null;
+  if (isVolunteerBusy(volunteerId)) return null;
+
+  for (const [seniorId, req] of pendingRequests.entries()) {
+    if (req?.status === 'pending' && (req?.requestType || 'chat') === 'chat') {
+      return startSession({ seniorId, volunteerId, req });
+    }
+  }
+  return null;
+};
+
 const saveMessage = async ({ conversationId, senderId, content, type = 'text' }) => {
   const { data, error } = await supabase
     .from(TABLES.MESSAGES)
@@ -251,11 +328,38 @@ app.get('/conversations/:id/messages', async (req, res) => {
     }
 
     // Get messages for this specific conversation only
-    const { data, error } = await supabase
-      .from(TABLES.MESSAGES)
-      .select('*')
-      .eq('conversation_id', id)
-      .order('created_at', { ascending: true });
+    let data = null;
+    let error = null;
+    const orderCandidates = ['created_at', 'sent_at', 'inserted_at', 'timestamp', 'createdAt', 'id'];
+    for (const col of orderCandidates) {
+      const resp = await supabase
+        .from(TABLES.MESSAGES)
+        .select('*')
+        .eq('conversation_id', id)
+        .order(col, { ascending: true });
+
+      if (!resp.error) {
+        data = resp.data;
+        error = null;
+        break;
+      }
+
+      // 42703 = undefined_column
+      if (resp.error.code !== '42703') {
+        error = resp.error;
+        break;
+      }
+    }
+
+    if (!data && !error) {
+      const resp = await supabase
+        .from(TABLES.MESSAGES)
+        .select('*')
+        .eq('conversation_id', id);
+
+      if (resp.error) throw resp.error;
+      data = resp.data;
+    }
 
     if (error) throw error;
     
@@ -349,10 +453,14 @@ io.on('connection', (socket) => {
   socket.on('identify', ({ userId, role }) => {
     socket.data.userId = userId;
     socket.data.role = role;
-    if (userId) userSockets.set(userId, socket.id);
+    if (userId) {
+      userSockets.set(userId, socket.id);
+      console.log(`[SOCKET] ${role} ${userId} identified with socket ${socket.id}`);
+    }
     if (role === 'VOLUNTEER') {
       onlineVolunteers.set(userId, socket.id);
       io.emit('volunteer:online', { volunteerId: userId });
+      console.log(`[SOCKET] Volunteer ${userId} now online`);
 
       // Send any pending seeker requests to this newly online volunteer
       pendingRequests.forEach((req, seniorId) => {
@@ -361,6 +469,10 @@ io.on('connection', (socket) => {
           io.to(socket.id).emit('seeker:incoming', { seniorId, requestType, note });
         }
       });
+
+      claimFirstPendingChatForVolunteer({ volunteerId: userId }).catch((e) => {
+        console.error(`[REQUEST] Auto-match failed for volunteer ${userId}:`, e);
+      });
     }
   });
 
@@ -368,13 +480,82 @@ io.on('connection', (socket) => {
   socket.on('seeker:request', async ({ seniorId, requestType = 'chat', note = '' }) => {
     try {
       if (!seniorId) return;
+      
+      console.log(`[REQUEST] New seeker request from ${seniorId}: type=${requestType}`);
+      
+      // Store in memory for quick lookup
       pendingRequests.set(seniorId, { status: 'pending', requestType, note });
 
+      // Also store in database immediately so caregivers can see it
+      // Try to create the help request, but don't fail if DB isn't available
+      try {
+        // First, ensure the senior record exists in the users table
+        try {
+          const { data: existingSenior, error: selectError } = await supabase
+            .from(TABLES.USERS)
+            .select('id')
+            .eq('id', seniorId);
+          
+          // If not found or error, try to create
+          if (selectError || !existingSenior || existingSenior.length === 0) {
+            console.log(`[REQUEST] Senior ${seniorId} doesn't have users table record, creating one`);
+            const { error: insertError } = await supabase.from(TABLES.USERS).insert({
+              id: seniorId,
+              role: 'elderly',
+              created_at: new Date().toISOString(),
+            });
+            
+            if (insertError) {
+              console.warn(`[REQUEST] Could not create users record:`, insertError.message);
+            } else {
+              console.log(`[REQUEST] Created users record for ${seniorId}`);
+            }
+          }
+        } catch (userCheckError) {
+          console.warn(`[REQUEST] Error checking/creating user record:`, userCheckError.message);
+        }
+
+        const { data, error } = await supabase.from(TABLES.HELP_REQUESTS).insert({
+          senior_id: seniorId,
+          category: requestType === 'voice' ? 'Voice Call' : requestType === 'emotional' ? 'Emotional Support' : 'Chat',
+          description: note || '',
+          priority: 'medium',
+          status: 'pending',
+          created_at: new Date().toISOString(),
+        }).select().single();
+
+        if (error) {
+          console.warn(`[REQUEST] Failed to store pending request in DB:`, error);
+          // Don't block the request - continue with socket notifications anyway
+        } else {
+          console.log(`[REQUEST] Stored pending request in database:`, data.id);
+        }
+      } catch (dbError) {
+        console.warn(`[REQUEST] DB insertion error:`, dbError);
+        // Don't block the request - continue with socket notifications anyway
+      }
+
       if (onlineVolunteers.size === 0) {
+        console.log(`[REQUEST] No volunteers online, queuing request`);
         socket.emit('seeker:queued');
       }
 
+      if (requestType === 'chat' && onlineVolunteers.size > 0) {
+        let pickedVolunteerId = null;
+        for (const volId of onlineVolunteers.keys()) {
+          if (!isVolunteerBusy(volId)) {
+            pickedVolunteerId = volId;
+            break;
+          }
+        }
+        if (pickedVolunteerId) {
+          await startSession({ seniorId, volunteerId: pickedVolunteerId, req: { requestType, note } });
+          return;
+        }
+      }
+
       // Notify all online volunteers via socket
+      // This works even if database storage failed
       onlineVolunteers.forEach((volSocketId, volId) => {
         io.to(volSocketId).emit('seeker:incoming', { seniorId, requestType, note });
         // Optional push notification if token present
@@ -383,6 +564,7 @@ io.on('connection', (socket) => {
         sendPushNotification(volId, title, body, { seniorId, requestType });
       });
     } catch (e) {
+      console.error(`[REQUEST] Error in seeker:request:`, e);
       socket.emit('error', { message: e.message });
     }
   });
@@ -408,35 +590,48 @@ io.on('connection', (socket) => {
       if (!req || req.status !== 'pending') {
         return; // already claimed or not pending
       }
-      // claim
-      pendingRequests.set(seniorId, { status: 'claimed', volunteerId });
+      await startSession({ seniorId, volunteerId, req });
+    } catch (e) {
+      socket.emit('error', { message: e.message });
+    }
+  });
 
-      // Create conversation and wire sockets into room
-      const conversation = await createConversation(seniorId, volunteerId);
-      const convRoom = `conv:${conversation.id}`;
-      sessions.set(conversation.id, { seniorId, volunteerId });
+  // Senior cancels a pending request
+  socket.on('request:cancel', async ({ seniorId }) => {
+    try {
+      if (!seniorId) return;
+      const req = pendingRequests.get(seniorId);
+      if (!req || req.status !== 'pending') {
+        return; // already claimed or not pending
+      }
 
-      const seniorSocketId = userSockets.get(seniorId);
-      const volunteerSocketId = onlineVolunteers.get(volunteerId);
-      if (seniorSocketId) io.sockets.sockets.get(seniorSocketId)?.join(convRoom);
-      if (volunteerSocketId) io.sockets.sockets.get(volunteerSocketId)?.join(convRoom);
+      // Remove pending request
+      pendingRequests.delete(seniorId);
+      console.log(`[REQUEST] Senior ${seniorId} cancelled their request`);
 
-      // Notify chosen volunteer and senior
-      const { requestType = 'chat', note = '' } = req || {};
-      const startedPayload = { conversationId: conversation.id, seniorId, volunteerId, requestType, note };
-      if (seniorSocketId) io.to(seniorSocketId).emit('session:started', startedPayload);
-      if (volunteerSocketId) io.to(volunteerSocketId).emit('session:started', startedPayload);
-
-      // Notify others that request was claimed
+      // Notify all volunteers that this request was cancelled
       onlineVolunteers.forEach((volSocketId, volId) => {
-        if (volId !== volunteerId) io.to(volSocketId).emit('request:claimed', { seniorId, volunteerId });
+        io.to(volSocketId).emit('request:cancelled', { seniorId });
       });
 
-      // Push notifications to both sides
-      const acceptTitle = requestType === 'voice' ? 'Voice session started' : (requestType === 'emotional' ? 'Support session started' : 'Chat started');
-      const acceptBody = note && note.length ? note : 'A volunteer accepted your request';
-      sendPushNotification(seniorId, acceptTitle, acceptBody, { conversationId: conversation.id, volunteerId, requestType });
-      sendPushNotification(volunteerId, acceptTitle, acceptBody, { conversationId: conversation.id, seniorId, requestType });
+      // Notify senior that request was cancelled
+      const seniorSocketId = userSockets.get(seniorId);
+      if (seniorSocketId) {
+        io.to(seniorSocketId).emit('request:cancelled', { status: 'cancelled' });
+      }
+    } catch (e) {
+      console.error(`[REQUEST] Error cancelling request:`, e);
+      socket.emit('error', { message: e.message });
+    }
+  });
+
+  // Get request status
+  socket.on('request:status', async ({ seniorId }) => {
+    try {
+      if (!seniorId) return;
+      const req = pendingRequests.get(seniorId);
+      const status = req ? req.status : 'no_pending_request';
+      socket.emit('request:status:response', { seniorId, status, request: req });
     } catch (e) {
       socket.emit('error', { message: e.message });
     }
@@ -483,6 +678,10 @@ io.on('connection', (socket) => {
       // Notify all participants that chat has ended
       io.to(`conv:${conversationId}`).emit('chat:ended', { conversationId, endedBy: userId });
       console.log(`[CHAT] Conversation ${conversationId} ended by ${userId}`);
+
+      sessions.delete(conversationId);
+      const numericId = Number(conversationId);
+      if (!Number.isNaN(numericId)) sessions.delete(numericId);
     } catch (e) {
       socket.emit('error', { message: e.message });
     }
@@ -1306,61 +1505,312 @@ app.post('/help-requests', ensureAuth, async (req, res) => {
 
 app.get('/help-requests', ensureAuth, async (req, res) => {
   try {
-    const { status, role } = req.query;
-    let query = supabase.from(TABLES.HELP_REQUESTS).select('*, senior:users!senior_id(*)');
-
-    if (status) {
-      query = query.eq('status', status);
-    }
+    console.log(`[DEBUG] Fetching help requests for user ${req.user.id} (role: ${req.user.role})`);
+    const { status } = req.query;
+    let query = supabase.from(TABLES.HELP_REQUESTS).select();
 
     if (req.user.role === 'volunteer' || req.user.role === 'caregiver') {
-      // Volunteers see pending requests or those assigned to them
-      if (status === 'pending') {
-        query = query.eq('status', 'pending');
-      } else if (status === 'accepted') {
+      // Volunteers see pending requests (all pending) or their own accepted requests
+      if (status === 'accepted') {
+        // Show only their accepted requests
         query = query.eq('volunteer_id', req.user.id).eq('status', 'accepted');
+        console.log(`[DEBUG] Caregiver viewing accepted requests`);
+      } else {
+        // Default: show all pending requests
+        query = query.eq('status', 'pending');
+        console.log(`[DEBUG] Caregiver viewing pending requests (status=pending filter applied)`);
       }
     } else if (req.user.role === 'elderly' || req.user.role === 'senior') {
-      // Seniors see their own requests
+      // Seniors see only their own requests
       query = query.eq('senior_id', req.user.id);
+      if (status) {
+        query = query.eq('status', status);
+      }
+      console.log(`[DEBUG] Senior viewing own requests (senior_id=${req.user.id})`);
+    } else {
+      // Admin sees all requests
+      if (status) {
+        query = query.eq('status', status);
+      }
+      console.log(`[DEBUG] Admin viewing all requests`);
     }
 
-    const { data, error } = await query.order('created_at', { ascending: false });
+    const { data: requests, error } = await query.order('created_at', { ascending: false });
 
-    if (error) throw error;
+    if (error) {
+      console.error(`[ERROR] Database query error:`, error);
+      console.error(`[ERROR] Error code:`, error.code);
+      console.error(`[ERROR] Error message:`, error.message);
+      
+      // Check if table doesn't exist
+      if (error.code === 'PGRST205' || error.message?.includes('Could not find the table') || error.message?.includes('relation') && error.message?.includes('does not exist')) {
+        console.error('[ERROR] ========================================');
+        console.error('[ERROR] help_requests table does not exist!');
+        console.error('[ERROR] ========================================');
+        console.error('[ERROR] Please create the table in Supabase using the SQL in:');
+        console.error('[ERROR] File: server/SETUP_HELP_REQUESTS_TABLE.sql');
+        console.error('[ERROR] ========================================');
+        return res.status(500).json({ 
+          error: 'Database table not configured',
+          code: 'TABLE_NOT_FOUND',
+          message: 'help_requests table does not exist. Please run the SQL setup script in Supabase.',
+          instructions: 'Run server/SETUP_HELP_REQUESTS_TABLE.sql in your Supabase SQL editor'
+        });
+      }
+      
+      throw error;
+    }
     
-    // Parse senior metadata
-    const parsedData = data.map(req => ({
-      ...req,
-      senior: parseProfileData(req.senior)
+    console.log(`[DEBUG] Query successful, found ${(requests || []).length} requests`);
+    console.log(`[DEBUG] Requests data:`, requests);
+    
+    // If no requests, return empty array with diagnostic info
+    if (!requests || requests.length === 0) {
+      console.log(`[DEBUG] No requests found (this is OK if no seniors have requested help yet)`);
+      return res.json({ requests: [], message: 'No pending requests' });
+    }
+    
+    // Fetch senior data separately for each request
+    const enrichedRequests = await Promise.all((requests || []).map(async (helpRequest) => {
+      try {
+        const { data: senior, error: seniorError } = await supabase
+          .from(TABLES.USERS)
+          .select()
+          .eq('id', helpRequest.senior_id)
+          .single();
+        
+        if (seniorError && seniorError.code !== 'PGRST116') {
+          console.warn(`[WARN] Senior fetch error for ${helpRequest.senior_id}:`, seniorError);
+        }
+        
+        return {
+          ...helpRequest,
+          senior: senior ? parseProfileData(senior) : null
+        };
+      } catch (e) {
+        console.warn(`[WARN] Failed to fetch senior for request ${helpRequest.id}:`, e.message);
+        return {
+          ...helpRequest,
+          senior: null
+        };
+      }
     }));
 
-    res.json({ requests: parsedData });
+    console.log(`[DEBUG] Returning ${enrichedRequests.length} enriched requests`);
+    res.json({ requests: enrichedRequests });
   } catch (e) {
     console.error(`[ERROR] Failed to fetch help requests:`, e);
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ error: e.message, details: e.toString() });
   }
 });
 
 app.put('/help-requests/:id/accept', ensureAuth, async (req, res) => {
   try {
     const { id } = req.params;
-    const { data, error } = await supabase
+    
+    console.log(`[REQUEST] Accepting help request ${id} by volunteer ${req.user.id}`);
+    
+    // First, fetch the request to verify it exists and is pending
+    const { data: helpRequest, error: fetchError } = await supabase
+      .from(TABLES.HELP_REQUESTS)
+      .select()
+      .eq('id', id)
+      .single();
+
+    if (fetchError || !helpRequest) {
+      console.error(`[REQUEST] Help request not found:`, fetchError);
+      return res.status(404).json({ error: 'Help request not found' });
+    }
+
+    if (helpRequest.status !== 'pending') {
+      console.warn(`[REQUEST] Help request is not pending (status=${helpRequest.status})`);
+      return res.status(400).json({ error: `Request is already ${helpRequest.status}` });
+    }
+
+    // Now update it
+    const { data: updatedRequest, error: updateError } = await supabase
       .from(TABLES.HELP_REQUESTS)
       .update({
         volunteer_id: req.user.id,
         status: 'accepted',
-        assigned_at: new Date().toISOString()
+        accepted_at: new Date().toISOString()
       })
       .eq('id', id)
-      .eq('status', 'pending')
       .select()
       .single();
 
-    if (error) throw error;
-    res.json({ request: data });
+    if (updateError) {
+      console.error(`[REQUEST] Accept failed:`, updateError);
+      return res.status(500).json({ error: 'Failed to accept request' });
+    }
+    
+    const { senior_id: seniorId, category: requestType } = updatedRequest;
+    
+    console.log(`[REQUEST] Successfully accepted by ${req.user.id}, creating conversation with ${seniorId}`);
+    
+    // Get or create conversation
+    let conversation;
+    try {
+      const { data: existingConv, error: convFetchError } = await supabase
+        .from(TABLES.CONVERSATIONS)
+        .select()
+        .eq('senior_id', seniorId)
+        .eq('companion_id', req.user.id);
+      
+      if (existingConv && existingConv.length > 0) {
+        conversation = existingConv[0];
+        console.log(`[REQUEST] Using existing conversation ${conversation.id}`);
+      } else {
+        // Create new conversation if doesn't exist
+        console.log(`[REQUEST] Creating new conversation`);
+        const { data: newConv, error: createError } = await supabase
+          .from(TABLES.CONVERSATIONS)
+          .insert({ senior_id: seniorId, companion_id: req.user.id })
+          .select()
+          .single();
+        
+        if (createError || !newConv) {
+          console.warn(`[REQUEST] Failed to create conversation:`, createError);
+          // Continue anyway - conversations table might not exist
+          conversation = { id: `conv-${seniorId}-${req.user.id}` };
+        } else {
+          conversation = newConv;
+          console.log(`[REQUEST] Created new conversation ${newConv.id}`);
+        }
+      }
+    } catch (e) {
+      console.warn(`[REQUEST] Conversation fetch error:`, e.message);
+      conversation = { id: `conv-${seniorId}-${req.user.id}` };
+    }
+
+    // Wire sockets into the conversation room
+    if (conversation) {
+      const convRoom = `conv:${conversation.id}`;
+      const seniorSocketId = userSockets.get(seniorId);
+      const volunteerSocketId = onlineVolunteers.get(req.user.id);
+      
+      console.log(`[REQUEST] Wiring sockets to room ${convRoom}`);
+      console.log(`[REQUEST] Senior ${seniorId} socket: ${seniorSocketId}`);
+      console.log(`[REQUEST] Volunteer ${req.user.id} socket: ${volunteerSocketId}`);
+      
+      if (seniorSocketId) io.sockets.sockets.get(seniorSocketId)?.join(convRoom);
+      if (volunteerSocketId) io.sockets.sockets.get(volunteerSocketId)?.join(convRoom);
+      
+      sessions.set(conversation.id, { seniorId, volunteerId: req.user.id });
+
+      // Notify both parties via socket
+      const startedPayload = { 
+        conversationId: conversation.id, 
+        seniorId, 
+        volunteerId: req.user.id,
+        requestType,
+      };
+      
+      // Send to senior - try direct socket first, then broadcast to all clients
+      if (seniorSocketId) {
+        io.to(seniorSocketId).emit('session:started', startedPayload);
+        console.log(`[REQUEST] ✅ Notified senior ${seniorId} via direct socket`);
+      } else {
+        // Fallback: broadcast to all sockets (senior might be a new connection)
+        io.emit('session:started', startedPayload);
+        console.warn(`[REQUEST] ⚠️  Senior ${seniorId} not in userSockets, broadcasting to all`);
+      }
+      
+      // Send to volunteer
+      if (volunteerSocketId) {
+        io.to(volunteerSocketId).emit('session:started', startedPayload);
+        console.log(`[REQUEST] ✅ Notified volunteer ${req.user.id} via direct socket`);
+      }
+      
+      // Notify other volunteers
+      onlineVolunteers.forEach((volSocketId, volId) => {
+        if (volId !== req.user.id) {
+          io.to(volSocketId).emit('request:claimed', { seniorId, volunteerId: req.user.id });
+        }
+      });
+    }
+
+    // Return both the request and the conversation ID
+    res.json({ 
+      request: updatedRequest,
+      conversation: { id: conversation.id },
+      conversationId: conversation.id
+    });
   } catch (e) {
     console.error(`[ERROR] Failed to accept help request:`, e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /conversations - Get all conversations for the current user
+app.get('/conversations', ensureAuth, async (req, res) => {
+  try {
+    console.log(`[CONVERSATIONS] Fetching conversations for user ${req.user.id} (role: ${req.user.role})`);
+    
+    let query = supabase.from(TABLES.CONVERSATIONS).select('*');
+    
+    // Filter based on user role
+    if (req.user.role === 'volunteer' || req.user.role === 'caregiver') {
+      // Volunteers see conversations where they are the companion
+      query = query.eq('companion_id', req.user.id);
+      console.log(`[CONVERSATIONS] Caregiver viewing their conversations as companion`);
+    } else if (req.user.role === 'elderly' || req.user.role === 'senior') {
+      // Seniors see conversations where they are the senior
+      query = query.eq('senior_id', req.user.id);
+      console.log(`[CONVERSATIONS] Senior viewing their conversations`);
+    }
+    
+    const { data: conversations, error } = await query.order('last_message_at', { ascending: false, nullsFirst: false });
+    
+    if (error) {
+      console.error(`[ERROR] Conversations query error:`, error);
+      
+      if (error.code === 'PGRST205' || error.message?.includes('Could not find the table')) {
+        console.error('[ERROR] conversations table does not exist');
+        return res.json({ conversations: [] });
+      }
+      
+      throw error;
+    }
+    
+    console.log(`[CONVERSATIONS] Found ${(conversations || []).length} conversations`);
+    
+    if (!conversations || conversations.length === 0) {
+      return res.json({ conversations: [] });
+    }
+    
+    // Fetch companion/senior data for each conversation
+    const enrichedConversations = await Promise.all((conversations || []).map(async (conv) => {
+      try {
+        const companionId = req.user.role === 'volunteer' || req.user.role === 'caregiver' ? conv.senior_id : conv.companion_id;
+        
+        const { data: user, error: userError } = await supabase
+          .from(TABLES.USERS)
+          .select()
+          .eq('id', companionId)
+          .single();
+        
+        if (userError && userError.code !== 'PGRST116') {
+          console.warn(`[WARN] User fetch error for ${companionId}:`, userError);
+        }
+        
+        return {
+          ...conv,
+          companion: user ? parseProfileData(user) : { id: companionId }
+        };
+      } catch (e) {
+        console.warn(`[WARN] Failed to fetch user for conversation ${conv.id}:`, e.message);
+        return {
+          ...conv,
+          companion: { id: req.user.role === 'volunteer' || req.user.role === 'caregiver' ? conv.senior_id : conv.companion_id }
+        };
+      }
+    }));
+    
+    console.log(`[CONVERSATIONS] Returning ${enrichedConversations.length} enriched conversations`);
+    res.json({ conversations: enrichedConversations });
+  } catch (e) {
+    console.error(`[ERROR] Failed to fetch conversations:`, e);
     res.status(500).json({ error: e.message });
   }
 });

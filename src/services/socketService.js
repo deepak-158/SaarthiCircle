@@ -122,6 +122,18 @@ export const closeHelpRequest = ({ requestId, resolution }) => {
   getSocket().emit('help:close', { requestId, resolution });
 };
 
+// Request handling methods
+export const cancelChatRequest = ({ seniorId }) => {
+  getSocket().emit('request:cancel', { seniorId });
+};
+
+export const getSeniorRequestStatus = ({ seniorId }, callback) => {
+  const socket = getSocket();
+  socket.emit('request:status', { seniorId });
+  socket.off('request:status:response');
+  socket.on('request:status:response', callback);
+};
+
 export default {
   getSocket,
   identify,
@@ -140,4 +152,6 @@ export default {
   acceptHelpRequest,
   rejectHelpRequest,
   closeHelpRequest,
+  cancelChatRequest,
+  getSeniorRequestStatus,
 };

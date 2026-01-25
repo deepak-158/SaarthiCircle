@@ -90,7 +90,7 @@ const CompanionMatchingScreen = ({ navigation }) => {
     fetchCompanions();
   }, []);
 
-  // Initialize socket and request a real companion session
+  // Initialize socket and setup listeners
   useEffect(() => {
     const initSocket = async () => {
       try {
@@ -99,8 +99,10 @@ const CompanionMatchingScreen = ({ navigation }) => {
         const userId = profile?.id || profile?.uid || profile?.userId;
         const socket = getSocket();
 
+        // Setup listener for session:started (when volunteer accepts)
         socket.off('session:started');
         socket.on('session:started', ({ conversationId: cid, seniorId, volunteerId }) => {
+          console.log(`[DEBUG] Session started! conversationId=${cid}, volunteerId=${volunteerId}`);
           setConversationId(cid);
           const companionObj = { id: volunteerId, isReal: true };
           setCompanion(companionObj);
@@ -109,14 +111,17 @@ const CompanionMatchingScreen = ({ navigation }) => {
           navigation.navigate('Chat', { mode: 'text', companion: companionObj, conversationId: cid });
         });
 
+        // Setup listener for when request is queued
         socket.off('seeker:queued');
         socket.on('seeker:queued', () => {
+          console.log(`[DEBUG] Request queued, waiting for volunteer...`);
           setSearching(true);
         });
 
+        // Identify the senior (so backend knows this socket belongs to this user)
         if (userId) {
+          console.log(`[DEBUG] Identifying senior: ${userId}`);
           identify({ userId, role: 'SENIOR' });
-          requestCompanion({ seniorId: userId });
         }
       } catch (e) {
         console.error('Socket init error:', e);
@@ -261,6 +266,10 @@ const CompanionMatchingScreen = ({ navigation }) => {
   };
 
   const handleVoiceCall = () => {
+    if (!companion?.id) {
+      Alert.alert('Error', 'No companion selected');
+      return;
+    }
     (async () => {
       const cid = await getOrCreateConversationId(companion);
       startSession({ conversationId: cid, companion });
@@ -270,12 +279,46 @@ const CompanionMatchingScreen = ({ navigation }) => {
   };
 
   const handleTextChat = () => {
-    (async () => {
-      const cid = await getOrCreateConversationId(companion);
-      startSession({ conversationId: cid, companion });
-      setCallStatus(false);
-      navigation.navigate('Chat', { mode: 'text', companion, conversationId: cid });
-    })();
+    const seniorId = userProfile?.id || userProfile?.uid || userProfile?.userId;
+    
+    if (!seniorId) {
+      Alert.alert('Error', 'User not authenticated');
+      return;
+    }
+
+    // Instead of directly creating a conversation, emit a request to the backend
+    // This will trigger caregiver/volunteer notifications
+    setSearching(true);
+    
+    const socket = getSocket();
+    
+    // Listen for session:started - when volunteer accepts the request
+    socket.off('session:started');
+    socket.on('session:started', ({ conversationId: cid, seniorId, volunteerId }) => {
+      console.log('[DEBUG] Session started for chat request:', cid);
+      setConversationId(cid);
+      const companionObj = { id: volunteerId, isReal: true };
+      setCompanion(companionObj);
+      setSearching(false);
+      startSession({ conversationId: cid, companion: companionObj });
+      navigation.navigate('Chat', { mode: 'text', companion: companionObj, conversationId: cid });
+    });
+
+    // Listen for request:cancelled if volunteer rejects or disappears
+    socket.off('request:cancelled');
+    socket.on('request:cancelled', () => {
+      console.log('[DEBUG] Chat request was cancelled');
+      setSearching(false);
+      Alert.alert('Request Cancelled', 'The volunteer is no longer available. Please try again.');
+    });
+
+    // Emit the chat request
+    console.log('[DEBUG] Emitting seeker:request for text chat from senior:', seniorId);
+    requestCompanion({ 
+      seniorId: seniorId, 
+      requestType: 'chat',
+      note: 'Senior requesting text chat' 
+    });
   };
 
   // Emergency SOS Handler

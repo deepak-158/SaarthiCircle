@@ -20,6 +20,7 @@ import { BACKEND_URL } from '../../config/backend';
 import socketService, { getSocket, joinSession, sendMessage as socketSendMessage } from '../../services/socketService';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useChat } from '../../context/ChatContext';
+import { ActiveRequestOverlay } from '../../components/common';
 
 const conversationPrompts = [
   { id: 1, text: 'Talk about childhood memories', icon: 'memory' },
@@ -44,6 +45,9 @@ const ChatScreen = ({ navigation, route }) => {
   const [isListening, setIsListening] = useState(false);
   const [currentUserId, setCurrentUserId] = useState(null);
   const [userProfile, setUserProfile] = useState(null);
+  const [isWaitingForVolunteer, setIsWaitingForVolunteer] = useState(!conversationId);
+  const [isConnecting, setIsConnecting] = useState(false);
+  const [isConnected, setIsConnected] = useState(!!conversationId);
   
   const scrollViewRef = useRef();
   const callTimerRef = useRef(null);
@@ -182,6 +186,30 @@ const ChatScreen = ({ navigation, route }) => {
       socket.off('chat:ended', chatEndedHandler);
     };
   }, [cacheKey, conversationId, companion?.id]);
+
+  // Handle session started (volunteer accepted request)
+  useEffect(() => {
+    const socket = getSocket();
+    
+    const sessionStartedHandler = ({ conversationId: cid, seniorId, volunteerId }) => {
+      console.log('[CHAT] Session started:', { cid, seniorId, volunteerId });
+      setIsWaitingForVolunteer(false);
+      setIsConnecting(true);
+      setIsConnected(true);
+      
+      // Small delay to show connecting state
+      setTimeout(() => {
+        setIsConnecting(false);
+      }, 1000);
+    };
+
+    socket.off('session:started');
+    socket.on('session:started', sessionStartedHandler);
+
+    return () => {
+      socket.off('session:started', sessionStartedHandler);
+    };
+  }, []);
 
   useEffect(() => {
     if (!cacheKey) return;
@@ -437,6 +465,18 @@ const ChatScreen = ({ navigation, route }) => {
   // Text Chat Interface
   return (
     <SafeAreaView style={styles.safeArea}>
+      {/* Request Waiting Overlay */}
+      <ActiveRequestOverlay
+        visible={isWaitingForVolunteer && !conversationId}
+        volunteerName={companion?.fullName || 'Volunteer'}
+        requestType={mode === 'voice' ? 'voice' : 'chat'}
+        isWaiting={isWaitingForVolunteer && !isConnecting}
+        isConnecting={isConnecting && !isConnected}
+        isConnected={isConnected && !isWaitingForVolunteer}
+        onCancel={() => {
+          navigation.goBack();
+        }}
+      />
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.chatContainer}

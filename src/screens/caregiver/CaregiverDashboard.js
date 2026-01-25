@@ -240,6 +240,7 @@ const CaregiverDashboard = ({ navigation }) => {
   const handleAccept = async (requestId) => {
     try {
       const token = await AsyncStorage.getItem('userToken');
+      let conversationId = null;
       
       if (!requestId.toString().startsWith('dummy')) {
         const resp = await fetch(`${API_BASE}/help-requests/${requestId}/accept`, {
@@ -247,6 +248,10 @@ const CaregiverDashboard = ({ navigation }) => {
           headers: { 'Authorization': `Bearer ${token}` }
         });
         if (!resp.ok) throw new Error('Failed to accept request');
+        
+        const data = await resp.json();
+        conversationId = data.conversationId || data.conversation?.id;
+        console.log('[DEBUG] Accept response - conversationId:', conversationId);
       }
       
       // Update local state
@@ -255,7 +260,14 @@ const CaregiverDashboard = ({ navigation }) => {
       );
       
       const request = allRequests.find(r => r.id === requestId);
-      navigation.navigate('CaregiverInteraction', { requestId, request });
+      
+      // Pass conversationId to the next screen
+      navigation.navigate('CaregiverInteraction', { 
+        requestId, 
+        request,
+        conversationId,
+        seniorId: request?.senior?.id || request?.senior_id
+      });
     } catch (error) {
       console.error('Accept request error:', error);
       Alert.alert('Error', 'Failed to accept request. Please try again.');

@@ -19,7 +19,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { BACKEND_URL as API_BASE } from '../../config/backend';
 
 const CaregiverInteractionScreen = ({ navigation, route }) => {
-  const { requestId, request } = route.params || {};
+  const { requestId, request, conversationId, seniorId } = route.params || {};
   
   const [notes, setNotes] = useState('');
   const [status, setStatus] = useState('in_progress');
@@ -73,6 +73,20 @@ const CaregiverInteractionScreen = ({ navigation, route }) => {
       'Chat with Senior',
       'Choose how you want to message:',
       [
+        {
+          text: 'In-App Chat',
+          onPress: () => {
+            if (conversationId) {
+              navigation.navigate('Chat', {
+                mode: 'text',
+                companion: { id: seniorId, name: seniorDetails.name },
+                conversationId
+              });
+            } else {
+              Alert.alert('Error', 'Conversation not yet initialized. Please try again.');
+            }
+          }
+        },
         {
           text: 'WhatsApp',
           onPress: () => {
@@ -411,6 +425,25 @@ const CaregiverInteractionScreen = ({ navigation, route }) => {
 
         {/* Action Buttons */}
         <View style={styles.actionButtons}>
+          <LargeButton
+            title="Start In-App Chat"
+            onPress={() => {
+              if (conversationId && seniorId) {
+                navigation.navigate('Chat', {
+                  mode: 'text',
+                  companion: { id: seniorId, name: seniorDetails.name },
+                  conversationId
+                });
+              } else {
+                Alert.alert('Error', 'Conversation not yet initialized. Please try again.');
+              }
+            }}
+            icon="message-text"
+            variant="primary"
+            size="xl"
+            style={styles.chatButton}
+          />
+
           <LargeButton
             title="Mark as Resolved"
             onPress={handleMarkResolved}
