@@ -1,5 +1,5 @@
 // Caregiver Dashboard Screen
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { 
   View, 
   Text, 
@@ -17,6 +17,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { colors, typography, spacing, borderRadius, shadows } from '../../theme';
 import useIncomingCallListener from '../../hooks/useIncomingCallListener';
 // Firebase imports removed - feature being migrated to centralized backend
+import { useFocusEffect } from '@react-navigation/native';
+import { getSocket, identify } from '../../services/socketService';
 
 // Dummy/fallback requests data
 const DUMMY_REQUESTS = [
@@ -102,6 +104,7 @@ const CaregiverDashboard = ({ navigation }) => {
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState('pending');
   const [volunteerProfile, setVolunteerProfile] = useState(null);
+  const [availabilityOnline, setAvailabilityOnline] = useState(false);
 
   // Listen for incoming calls
   useIncomingCallListener();
@@ -109,6 +112,12 @@ const CaregiverDashboard = ({ navigation }) => {
   useEffect(() => {
     loadDashboardData();
   }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadDashboardData();
+    }, [])
+  );
 
   const loadDashboardData = async () => {
     try {
@@ -139,6 +148,17 @@ const CaregiverDashboard = ({ navigation }) => {
       
       // Load help requests (can be expanded to backend later)
       await loadHelpRequests();
+
+      // Load persisted availability for volunteer/caregiver
+      try {
+        const resp = await fetch(`${API_BASE}/volunteers/me/availability`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (resp.ok) {
+          const data = await resp.json();
+          setAvailabilityOnline(!!data?.isOnline);
+        }
+      } catch {}
       
     } catch (error) {
       console.error('Error loading dashboard:', error);
@@ -147,11 +167,44 @@ const CaregiverDashboard = ({ navigation }) => {
     }
   };
 
+  const toggleAvailability = async () => {
+    try {
+      const token = await AsyncStorage.getItem('userToken');
+      const next = !availabilityOnline;
+
+      const resp = await fetch(`${API_BASE}/volunteers/me/availability`, {
+        method: 'PUT',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isOnline: next })
+      });
+      if (!resp.ok) throw new Error('Failed to update availability');
+
+      setAvailabilityOnline(next);
+
+      // Sync socket state so seniors see it in real-time
+      try {
+        const profileJson = await AsyncStorage.getItem('userProfile');
+        const profile = profileJson ? JSON.parse(profileJson) : null;
+        const userId = profile?.id || profile?.uid || profile?.userId;
+        if (userId) {
+          if (next) identify({ userId, role: 'VOLUNTEER' });
+          const socket = getSocket();
+          socket?.emit('volunteer:availability', { volunteerId: userId, isOnline: next });
+        }
+      } catch {}
+    } catch (e) {
+      Alert.alert('Error', e?.message || 'Failed to update availability');
+    }
+  };
+
   const loadHelpRequests = async () => {
     try {
       const token = await AsyncStorage.getItem('userToken');
-      // Fetch pending requests
-      const resp = await fetch(`${API_BASE}/help-requests`, {
+      const resolvedDummyJson = await AsyncStorage.getItem('dummyResolvedIds');
+      const resolvedDummyIds = resolvedDummyJson ? JSON.parse(resolvedDummyJson) : [];
+      const resolvedDummySet = new Set(Array.isArray(resolvedDummyIds) ? resolvedDummyIds : []);
+      // Fetch all relevant requests (pending + own accepted/completed)
+      const resp = await fetch(`${API_BASE}/help-requests?status=all`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       
@@ -163,7 +216,7 @@ const CaregiverDashboard = ({ navigation }) => {
         seniorName: r.senior?.name || 'Anonymous Senior',
         helpType: r.category,
         priority: r.priority,
-        status: r.status,
+        status: (r.status === 'accepted' || r.status === 'escalated') ? 'active' : r.status,
         description: r.description,
         time: formatTimeAgo(r.created_at),
         icon: getIconForHelpType(r.category),
@@ -171,9 +224,17 @@ const CaregiverDashboard = ({ navigation }) => {
         raw: r // keep raw data for detail view
       }));
 
+      // Apply local completion state for dummy requests (for demo/testing on web)
+      const dummyRequests = DUMMY_REQUESTS.map((r) => {
+        if (resolvedDummySet.has(String(r.id))) {
+          return { ...r, status: 'completed', completedAt: r.completedAt || 'Just now' };
+        }
+        return r;
+      });
+
       // Combine with dummy only if empty for demo purposes
       if (realRequests.length === 0) {
-        setAllRequests(DUMMY_REQUESTS);
+        setAllRequests(dummyRequests);
       } else {
         setAllRequests(realRequests);
       }
@@ -256,7 +317,7 @@ const CaregiverDashboard = ({ navigation }) => {
       
       // Update local state
       setAllRequests(prev => 
-        prev.map(r => r.id === requestId ? { ...r, status: 'accepted' } : r)
+        prev.map(r => r.id === requestId ? { ...r, status: 'active' } : r)
       );
       
       const request = allRequests.find(r => r.id === requestId);
@@ -316,7 +377,14 @@ const CaregiverDashboard = ({ navigation }) => {
   };
 
   const handleViewDetails = (request) => {
-    navigation.navigate('CaregiverInteraction', { requestId: request.id, request });
+    const raw = request?.raw;
+    const convId =
+      request?.conversationId ||
+      request?.conversation_id ||
+      raw?.conversationId ||
+      raw?.conversation_id;
+    const sid = request?.senior?.id || request?.senior_id || raw?.senior_id;
+    navigation.navigate('CaregiverInteraction', { requestId: request.id, request, conversationId: convId, seniorId: sid });
   };
 
   const getPriorityColor = (priority) => {
@@ -366,16 +434,25 @@ const CaregiverDashboard = ({ navigation }) => {
               {volunteerProfile?.full_name || volunteerProfile?.fullName || 'Volunteer'}
             </Text>
           </View>
-          <TouchableOpacity 
-            style={styles.profileButton}
-            onPress={() => navigation.navigate('VolunteerProfile')}
-          >
-            <MaterialCommunityIcons
-              name="account-circle"
-              size={48}
-              color={colors.neutral.white}
-            />
-          </TouchableOpacity>
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            <TouchableOpacity
+              style={[styles.availabilityButton, availabilityOnline ? styles.availabilityOnline : styles.availabilityOffline]}
+              onPress={toggleAvailability}
+            >
+              <Text style={styles.availabilityText}>{availabilityOnline ? 'Online' : 'Offline'}</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity 
+              style={styles.profileButton}
+              onPress={() => navigation.navigate('VolunteerProfile')}
+            >
+              <MaterialCommunityIcons
+                name="account-circle"
+                size={48}
+                color={colors.neutral.white}
+              />
+            </TouchableOpacity>
+          </View>
         </View>
 
         {/* Stats */}
@@ -629,6 +706,23 @@ const styles = StyleSheet.create({
   },
   profileButton: {
     padding: spacing.xs,
+  },
+  availabilityButton: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: borderRadius.full,
+    marginRight: spacing.sm,
+  },
+  availabilityOnline: {
+    backgroundColor: 'rgba(46, 204, 113, 0.9)',
+  },
+  availabilityOffline: {
+    backgroundColor: 'rgba(231, 76, 60, 0.9)',
+  },
+  availabilityText: {
+    color: colors.neutral.white,
+    fontSize: typography.sizes.sm,
+    fontWeight: typography.weights.semiBold,
   },
   statsContainer: {
     flexDirection: 'row',

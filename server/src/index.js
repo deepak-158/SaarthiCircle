@@ -308,6 +308,51 @@ app.post('/conversations/find-or-create', async (req, res) => {
   }
 });
 
+app.put('/help-requests/:id/escalate', ensureAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { reason = '' } = req.body || {};
+
+    const { data: existing, error: fetchError } = await supabase
+      .from(TABLES.HELP_REQUESTS)
+      .select('id,status,description,volunteer_id')
+      .eq('id', id)
+      .eq('volunteer_id', req.user.id)
+      .maybeSingle();
+
+    if (fetchError) throw fetchError;
+    if (!existing) return res.status(404).json({ error: 'Help request not found' });
+
+    if (existing.status === 'completed' || existing.status === 'cancelled') {
+      return res.status(400).json({ error: `Cannot escalate a ${existing.status} request` });
+    }
+
+    const existingDesc = typeof existing.description === 'string' ? existing.description : '';
+    const trimmedReason = typeof reason === 'string' ? reason.trim() : '';
+    const reasonSuffix = trimmedReason ? `\n\n[Escalation] ${trimmedReason}` : `\n\n[Escalation]`;
+    const nextDescription = `${existingDesc}${reasonSuffix}`.trim();
+
+    const { data, error } = await supabase
+      .from(TABLES.HELP_REQUESTS)
+      .update({
+        status: 'escalated',
+        description: nextDescription,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', id)
+      .eq('volunteer_id', req.user.id)
+      .select()
+      .single();
+
+    if (error) throw error;
+    console.log(`[REQUEST] Help request ${id} escalated by ${req.user.id}. reason=${reason}`);
+    res.json({ request: data });
+  } catch (e) {
+    console.error(`[ERROR] Failed to escalate help request:`, e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.get('/conversations/:id/messages', async (req, res) => {
   try {
     const { id } = req.params;
@@ -459,6 +504,7 @@ io.on('connection', (socket) => {
     }
     if (role === 'VOLUNTEER') {
       onlineVolunteers.set(userId, socket.id);
+      setVolunteerAvailability({ volunteerId: userId, isOnline: true }).catch(() => {});
       io.emit('volunteer:online', { volunteerId: userId });
       console.log(`[SOCKET] Volunteer ${userId} now online`);
 
@@ -473,6 +519,30 @@ io.on('connection', (socket) => {
       claimFirstPendingChatForVolunteer({ volunteerId: userId }).catch((e) => {
         console.error(`[REQUEST] Auto-match failed for volunteer ${userId}:`, e);
       });
+    }
+  });
+
+  socket.on('volunteer:availability', async ({ volunteerId, isOnline }) => {
+    try {
+      const vid = volunteerId || socket.data?.userId;
+      if (!vid) return;
+      const nextOnline = !!isOnline;
+
+      // Only volunteers can toggle their own status
+      if (socket.data?.role !== 'VOLUNTEER') return;
+
+      await setVolunteerAvailability({ volunteerId: vid, isOnline: nextOnline });
+
+      if (nextOnline) {
+        onlineVolunteers.set(vid, socket.id);
+        io.emit('volunteer:online', { volunteerId: vid });
+        claimFirstPendingChatForVolunteer({ volunteerId: vid }).catch(() => {});
+      } else {
+        onlineVolunteers.delete(vid);
+        io.emit('volunteer:offline', { volunteerId: vid });
+      }
+    } catch (e) {
+      socket.emit('error', { message: e.message });
     }
   });
 
@@ -854,6 +924,7 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => {
     if (socket.data?.role === 'VOLUNTEER' && socket.data?.userId) {
       onlineVolunteers.delete(socket.data.userId);
+      setVolunteerAvailability({ volunteerId: socket.data.userId, isOnline: false }).catch(() => {});
       io.emit('volunteer:offline', { volunteerId: socket.data.userId });
     }
     if (socket.data?.userId) {
@@ -896,6 +967,63 @@ const avatarForGender = (gender) => {
   if (g === 'male' || g === 'm') return '👨';
   if (g === 'female' || g === 'f') return '👩';
   return '🧑';
+};
+
+const readUserMetadata = async (userId) => {
+  try {
+    const { data } = await supabase
+      .from(TABLES.USERS)
+      .select('avatar_emoji')
+      .eq('id', userId)
+      .single();
+
+    const raw = data?.avatar_emoji;
+    if (!raw) return {};
+    if (typeof raw === 'object') return raw;
+    if (typeof raw === 'string' && (raw.startsWith('{') || raw.startsWith('['))) {
+      return JSON.parse(raw);
+    }
+    // plain emoji string stored in column
+    if (typeof raw === 'string') return { avatar_emoji: raw };
+    return {};
+  } catch {
+    return {};
+  }
+};
+
+const writeUserMetadata = async (userId, patch = {}) => {
+  const existing = await readUserMetadata(userId);
+  // Always keep a real emoji stored in metadata.avatar_emoji so parseProfileData doesn't
+  // fall back to the JSON string.
+  let base = { ...existing };
+  if (!base.avatar_emoji) {
+    try {
+      const { data } = await supabase.from(TABLES.USERS).select('gender').eq('id', userId).single();
+      base.avatar_emoji = avatarForGender(data?.gender);
+    } catch {
+      base.avatar_emoji = '🧑';
+    }
+  }
+
+  const next = { ...base, ...patch };
+  const { data, error } = await supabase
+    .from(TABLES.USERS)
+    .update({ avatar_emoji: JSON.stringify(next) })
+    .eq('id', userId)
+    .select()
+    .single();
+  if (error) throw error;
+  return parseProfileData(data);
+};
+
+const setVolunteerAvailability = async ({ volunteerId, isOnline }) => {
+  if (!volunteerId) return null;
+  const patch = {
+    is_online: !!isOnline,
+    last_seen_at: !isOnline ? new Date().toISOString() : undefined,
+  };
+  if (patch.last_seen_at === undefined) delete patch.last_seen_at;
+  return writeUserMetadata(volunteerId, patch);
 };
 
 // Helper to parse profile metadata from avatar_emoji column
@@ -1469,11 +1597,37 @@ app.get('/volunteers/available', ensureAuth, async (req, res) => {
         // If undefined, check if role is volunteer (assume approved if role is set correctly)
         return v.role === 'volunteer';
       })
+      .filter(v => v.is_online === true)
       .slice(0, 20);
     
     res.json({ volunteers: approvedVolunteers });
   } catch (e) {
     console.error(`[ERROR] Failed to fetch available volunteers:`, e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/volunteers/me/availability', ensureAuth, async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from(TABLES.USERS)
+      .select('*')
+      .eq('id', req.user.id)
+      .single();
+    if (error && error.code !== 'PGRST116') throw error;
+    const parsed = parseProfileData({ id: req.user.id, email: req.user.email, phone: req.user.phone, ...data });
+    res.json({ isOnline: parsed?.is_online === true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.put('/volunteers/me/availability', ensureAuth, async (req, res) => {
+  try {
+    const { isOnline } = req.body || {};
+    const updated = await setVolunteerAvailability({ volunteerId: req.user.id, isOnline: !!isOnline });
+    res.json({ user: updated });
+  } catch (e) {
     res.status(500).json({ error: e.message });
   }
 });
@@ -1515,6 +1669,14 @@ app.get('/help-requests', ensureAuth, async (req, res) => {
         // Show only their accepted requests
         query = query.eq('volunteer_id', req.user.id).eq('status', 'accepted');
         console.log(`[DEBUG] Caregiver viewing accepted requests`);
+      } else if (status === 'completed') {
+        query = query.eq('volunteer_id', req.user.id).eq('status', 'completed');
+        console.log(`[DEBUG] Caregiver viewing completed requests`);
+      } else if (status === 'all') {
+        query = query.or(
+          `status.eq.pending,and(status.eq.accepted,volunteer_id.eq.${req.user.id}),and(status.eq.completed,volunteer_id.eq.${req.user.id}),and(status.eq.escalated,volunteer_id.eq.${req.user.id})`
+        );
+        console.log(`[DEBUG] Caregiver viewing all relevant requests (pending + own accepted/completed)`);
       } else {
         // Default: show all pending requests
         query = query.eq('status', 'pending');

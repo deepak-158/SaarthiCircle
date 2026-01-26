@@ -17,9 +17,13 @@ import { LargeButton, AccessibleInput } from '../../components/common';
 import { colors, typography, spacing, borderRadius, shadows } from '../../theme';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { BACKEND_URL as API_BASE } from '../../config/backend';
+import { useChat } from '../../context/ChatContext';
+import { getSocket } from '../../services/socketService';
 
 const CaregiverInteractionScreen = ({ navigation, route }) => {
   const { requestId, request, conversationId, seniorId } = route.params || {};
+
+  const { removeActiveChat } = useChat();
   
   const [notes, setNotes] = useState('');
   const [status, setStatus] = useState('in_progress');
@@ -162,36 +166,118 @@ const CaregiverInteractionScreen = ({ navigation, route }) => {
   };
 
   const handleMarkResolved = async () => {
-    Alert.alert(
-      'Mark as Resolved',
-      'Are you sure you want to mark this request as resolved?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Yes, Resolve',
-          onPress: async () => {
-            try {
-              if (requestId && !requestId.toString().startsWith('dummy')) {
-                const token = await AsyncStorage.getItem('userToken');
-                const resp = await fetch(`${API_BASE}/help-requests/${requestId}/complete`, {
-                  method: 'PUT',
-                  headers: { 'Authorization': `Bearer ${token}` }
-                });
-                if (!resp.ok) throw new Error('Failed to resolve request');
+    const doResolve = async () => {
+      const resolvedRequestId =
+        requestId ||
+        request?.id ||
+        request?.raw?.id ||
+        request?.raw?.request_id ||
+        request?.request_id;
+
+      if (!resolvedRequestId) {
+        throw new Error('Missing request id');
+      }
+
+      if (resolvedRequestId && !resolvedRequestId.toString().startsWith('dummy')) {
+        const token = await AsyncStorage.getItem('userToken');
+        const resp = await fetch(`${API_BASE}/help-requests/${resolvedRequestId}/complete`, {
+          method: 'PUT',
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (!resp.ok) {
+          let message = 'Failed to resolve request';
+          try {
+            const errJson = await resp.json();
+            if (errJson?.error) message = errJson.error;
+          } catch {}
+          throw new Error(message);
+        }
+      }
+
+      const resolvedConversationId =
+        conversationId ||
+        request?.conversationId ||
+        request?.conversation_id ||
+        request?.raw?.conversationId ||
+        request?.raw?.conversation_id;
+
+      if (resolvedConversationId && !String(resolvedConversationId).startsWith('local-')) {
+        try {
+          const profileJson = await AsyncStorage.getItem('userProfile');
+          const profile = profileJson ? JSON.parse(profileJson) : null;
+          const userId = profile?.id || profile?.uid || profile?.userId;
+          await fetch(`${API_BASE}/conversations/${resolvedConversationId}/end`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userId: userId || 'USER' }),
+          });
+          removeActiveChat?.(resolvedConversationId);
+          const socket = getSocket();
+          socket?.emit('chat:end', { conversationId: resolvedConversationId, userId: userId || 'USER' });
+        } catch (e) {
+          // ignore
+        }
+      }
+
+      try {
+        if (String(resolvedRequestId).startsWith('dummy')) {
+          const existing = await AsyncStorage.getItem('dummyResolvedIds');
+          const parsed = existing ? JSON.parse(existing) : [];
+          const next = Array.from(new Set([...(Array.isArray(parsed) ? parsed : []), String(resolvedRequestId)]));
+          await AsyncStorage.setItem('dummyResolvedIds', JSON.stringify(next));
+        } else {
+          await AsyncStorage.setItem('lastResolvedRequestId', String(resolvedRequestId));
+        }
+      } catch {}
+    };
+
+    try {
+      if (Platform.OS === 'web') {
+        const ok = globalThis?.confirm ? globalThis.confirm('Mark this request as resolved?') : true;
+        if (!ok) return;
+        await doResolve();
+        globalThis?.alert && globalThis.alert('Request marked as resolved!');
+        navigation.goBack();
+        return;
+      }
+
+      Alert.alert(
+        'Mark as Resolved',
+        'Are you sure you want to mark this request as resolved?',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Yes, Resolve',
+            onPress: async () => {
+              try {
+                await doResolve();
+                Alert.alert('Success', 'Request marked as resolved!');
+                navigation.goBack();
+              } catch (error) {
+                console.error('Resolve error:', error);
+                Alert.alert('Error', error?.message || 'Failed to resolve request. Please try again.');
               }
-              Alert.alert('Success', 'Request marked as resolved!');
-              navigation.goBack();
-            } catch (error) {
-              console.error('Resolve error:', error);
-              Alert.alert('Error', 'Failed to resolve request. Please try again.');
             }
           }
-        }
-      ]
-    );
+        ]
+      );
+    } catch (error) {
+      console.error('Resolve error:', error);
+      if (Platform.OS === 'web') {
+        globalThis?.alert && globalThis.alert(error?.message || 'Failed to resolve request.');
+      } else {
+        Alert.alert('Error', error?.message || 'Failed to resolve request. Please try again.');
+      }
+    }
   };
 
   const handleEscalate = () => {
+    if (Platform.OS === 'web') {
+      const reason = globalThis?.prompt ? globalThis.prompt('Enter escalation reason (optional):', '') : '';
+      confirmEscalation(reason || 'Escalated');
+      return;
+    }
+
     Alert.alert(
       'Escalate to Admin',
       'Please select a reason for escalation:',
@@ -218,6 +304,54 @@ const CaregiverInteractionScreen = ({ navigation, route }) => {
   };
 
   const confirmEscalation = (reason) => {
+    const doEscalate = async () => {
+      const resolvedRequestId =
+        requestId ||
+        request?.id ||
+        request?.raw?.id ||
+        request?.raw?.request_id ||
+        request?.request_id;
+      if (!resolvedRequestId) throw new Error('Missing request id');
+      if (String(resolvedRequestId).startsWith('dummy')) {
+        try {
+          const existing = await AsyncStorage.getItem('dummyResolvedIds');
+          const parsed = existing ? JSON.parse(existing) : [];
+          const next = Array.from(new Set([...(Array.isArray(parsed) ? parsed : []), String(resolvedRequestId)]));
+          await AsyncStorage.setItem('dummyResolvedIds', JSON.stringify(next));
+        } catch {}
+        return;
+      }
+
+      const token = await AsyncStorage.getItem('userToken');
+      const resp = await fetch(`${API_BASE}/help-requests/${resolvedRequestId}/escalate`, {
+        method: 'PUT',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason: reason || '' })
+      });
+      if (!resp.ok) {
+        let message = 'Failed to escalate request';
+        try {
+          const errJson = await resp.json();
+          if (errJson?.error) message = errJson.error;
+        } catch {}
+        throw new Error(message);
+      }
+    };
+
+    if (Platform.OS === 'web') {
+      const ok = globalThis?.confirm ? globalThis.confirm(`Escalate this request?\n\nReason: ${reason || 'N/A'}`) : true;
+      if (!ok) return;
+      doEscalate()
+        .then(() => {
+          globalThis?.alert && globalThis.alert('Request escalated to NGO/Admin.');
+          navigation.goBack();
+        })
+        .catch((e) => {
+          globalThis?.alert && globalThis.alert(e?.message || 'Failed to escalate request.');
+        });
+      return;
+    }
+
     Alert.alert(
       'Confirm Escalation',
       `This request will be escalated to admin with reason: "${reason}"\n\nAn admin will be notified immediately.`,
@@ -226,13 +360,17 @@ const CaregiverInteractionScreen = ({ navigation, route }) => {
         {
           text: 'Escalate Now',
           style: 'destructive',
-          onPress: () => {
-            // In a real app, this would send to Firebase/backend
-            Alert.alert(
-              'Escalated',
-              'This request has been escalated to the admin team. They will contact you shortly.',
-              [{ text: 'OK', onPress: () => navigation.goBack() }]
-            );
+          onPress: async () => {
+            try {
+              await doEscalate();
+              Alert.alert(
+                'Escalated',
+                'This request has been escalated to the admin team. They will contact you shortly.',
+                [{ text: 'OK', onPress: () => navigation.goBack() }]
+              );
+            } catch (e) {
+              Alert.alert('Error', e?.message || 'Failed to escalate request.');
+            }
           }
         }
       ]

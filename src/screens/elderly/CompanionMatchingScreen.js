@@ -123,6 +123,21 @@ const CompanionMatchingScreen = ({ navigation }) => {
           console.log(`[DEBUG] Identifying senior: ${userId}`);
           identify({ userId, role: 'SENIOR' });
         }
+
+        // Refresh companion list when volunteer availability changes
+        socket.off('volunteer:online');
+        socket.on('volunteer:online', () => {
+          fetchCompanions();
+        });
+
+        socket.off('volunteer:offline');
+        socket.on('volunteer:offline', ({ volunteerId }) => {
+          if (companion?.isReal && String(companion?.id) === String(volunteerId)) {
+            setSearching(true);
+            setCompanion(null);
+          }
+          fetchCompanions();
+        });
       } catch (e) {
         console.error('Socket init error:', e);
       }
@@ -132,8 +147,10 @@ const CompanionMatchingScreen = ({ navigation }) => {
       const socket = getSocket();
       socket.off('session:started');
       socket.off('seeker:queued');
+      socket.off('volunteer:online');
+      socket.off('volunteer:offline');
     };
-  }, [navigation]);
+  }, [navigation, companion]);
 
   useEffect(() => {
     // Pulse animation during search
@@ -184,7 +201,7 @@ const CompanionMatchingScreen = ({ navigation }) => {
         phone: v.phone || '',
         language: Array.isArray(v.skills) ? v.skills.join(', ') : 'Hindi, English',
         interests: v.skills || ['General Help'],
-        availableTime: 'Available Now',
+        availableTime: v.is_online === true ? 'Online' : 'Offline',
         isReal: true,
         rating: v.rating || 4.5,
       }));
