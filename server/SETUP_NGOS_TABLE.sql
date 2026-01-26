@@ -1,6 +1,6 @@
 -- SQL for NGO integration
 -- Run this in Supabase SQL Editor
-
+n
 -- 1. Create ngos table
 CREATE TABLE IF NOT EXISTS public.ngos (
   id uuid DEFAULT gen_random_uuid() PRIMARY KEY,

@@ -993,18 +993,23 @@ const ensureNgo = (req, res, next) => {
       return res.status(403).json({ error: 'Forbidden: User not authenticated' });
     }
 
-    const role = String(req.user.role || '').toLowerCase();
+    // IMPORTANT: Many deployments store approval/verification flags in metadata
+    // (avatar_emoji JSON). Normalize user first so checks are consistent.
+    const parsedUser = parseProfileData(req.user);
+    req.user = parsedUser;
+
+    const role = String(parsedUser.role || '').toLowerCase();
     if (role !== 'ngo') {
       return res.status(403).json({ error: 'Forbidden: NGO access required', userRole: req.user.role });
     }
 
-    const isBlocked = req.user.is_blocked === true || req.user.blocked === true;
+    const isBlocked = parsedUser.is_blocked === true || parsedUser.blocked === true;
     if (isBlocked) {
       return res.status(403).json({ error: 'Forbidden: Account disabled' });
     }
 
-    const isApproved = req.user.is_approved === true;
-    const isVerified = req.user.is_verified === true || req.user.verified === true;
+    const isApproved = parsedUser.is_approved === true;
+    const isVerified = parsedUser.is_verified === true || parsedUser.verified === true;
     if (!isApproved || !isVerified) {
       return res.status(403).json({ error: 'Forbidden: NGO not approved', approved: !!isApproved, verified: !!isVerified });
     }
@@ -2337,7 +2342,7 @@ app.get('/ngo/volunteers', ensureNgo, async (req, res) => {
     const { data, error } = await supabase
       .from(TABLES.USERS)
       .select('*')
-      .eq('role', 'volunteer')
+      .in('role', ['volunteer', 'volunteer_pending'])
       .order('updated_at', { ascending: false })
       .limit(lim);
     if (error) throw error;
@@ -2349,6 +2354,130 @@ app.get('/ngo/volunteers', ensureNgo, async (req, res) => {
     res.json({ volunteers });
   } catch (e) {
     console.error('[ERROR] Failed to fetch NGO volunteers:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/ngo/volunteers/add', ensureNgo, async (req, res) => {
+  try {
+    const {
+      email,
+      full_name,
+      name,
+      phone,
+      city,
+      address,
+      gender,
+      skills,
+      why_volunteer,
+    } = req.body || {};
+
+    const emailNorm = String(email || '').trim().toLowerCase();
+    if (!emailNorm) return res.status(400).json({ error: 'email required' });
+
+    const now = new Date().toISOString();
+    const vName = String(full_name || name || '').trim();
+    if (!vName) return res.status(400).json({ error: 'full_name required' });
+
+    let existing = null;
+    let existingErr = null;
+    try {
+      const resp = await supabase
+        .from(TABLES.USERS)
+        .select('*')
+        .eq('email', emailNorm)
+        .maybeSingle();
+      existing = resp?.data || null;
+      existingErr = resp?.error || null;
+    } catch (e) {
+      existing = null;
+      existingErr = e;
+    }
+    if (existingErr && existingErr.code !== 'PGRST116') {
+      throw existingErr;
+    }
+
+    if (existing) {
+      const exRole = String(existing.role || '').toLowerCase();
+      if (exRole && exRole !== 'volunteer' && exRole !== 'volunteer_pending') {
+        return res.status(400).json({ error: `User already exists with role ${existing.role}` });
+      }
+    }
+
+    const id = existing?.id || randomUUID();
+    const existingMeta = existing?.id ? await readUserMetadata(existing.id) : {};
+
+    const metadata = {
+      ...existingMeta,
+      gender: gender !== undefined ? gender : existingMeta.gender,
+      age: existingMeta.age,
+      city: city !== undefined ? city : existingMeta.city,
+      address: address !== undefined ? address : existingMeta.address,
+      skills: skills !== undefined ? skills : existingMeta.skills,
+      why_volunteer: why_volunteer !== undefined ? why_volunteer : existingMeta.why_volunteer,
+      is_approved: false,
+      created_by_ngo: true,
+      created_by_ngo_id: req.user.id,
+      created_by_ngo_at: now,
+      avatar_emoji: existingMeta.avatar_emoji || avatarForGender(gender || existing?.gender),
+    };
+
+    const upsertUser = {
+      id,
+      email: emailNorm,
+      phone: phone !== undefined ? phone : existing?.phone || null,
+      name: vName,
+      role: 'volunteer_pending',
+      gender: gender !== undefined ? gender : existing?.gender || null,
+      avatar_emoji: JSON.stringify(metadata),
+      updated_at: now,
+    };
+
+    const { data, error } = await supabase
+      .from(TABLES.USERS)
+      .upsert(upsertUser, { onConflict: 'id' })
+      .select()
+      .single();
+    if (error) throw error;
+
+    try {
+      const upd = await supabase
+        .from(TABLES.PENDING_APPROVALS)
+        .update({
+          email: emailNorm,
+          full_name: vName,
+          phone: phone || existing?.phone || null,
+          role: 'volunteer',
+          status: 'pending',
+          created_at: now,
+          decided_at: null,
+        })
+        .eq('uid', id)
+        .select();
+
+      if (upd?.error || !Array.isArray(upd?.data) || upd.data.length === 0) {
+        await supabase.from(TABLES.PENDING_APPROVALS).insert({
+          uid: id,
+          email: emailNorm,
+          full_name: vName,
+          phone: phone || existing?.phone || null,
+          role: 'volunteer',
+          status: 'pending',
+          created_at: now,
+        });
+      }
+    } catch (e) {
+      console.warn('[WARN] Failed to insert pending_approvals for NGO-added volunteer:', e?.message || e);
+    }
+
+    const parsed = parseProfileData(data);
+    emitAdminUpdate({ type: 'user', action: 'volunteer_added_by_ngo', user: parsed, ngoId: req.user.id });
+    emitNgoUpdate({ ngoId: req.user.id, type: 'volunteer', action: 'added', volunteer: parsed });
+    await logNgoActivity({ ngoId: req.user.id, action: 'add_volunteer', entityType: 'user', entityId: id, details: { email: emailNorm } });
+
+    res.json({ volunteer: parsed });
+  } catch (e) {
+    console.error('[ERROR] Failed to add volunteer by NGO:', e);
     res.status(500).json({ error: e.message });
   }
 });
