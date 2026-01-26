@@ -22,6 +22,7 @@ import { login as authLogin } from '../../services/authService';
 const USER_ROLES = {
   ELDERLY: 'elderly',
   VOLUNTEER: 'volunteer',
+  NGO: 'ngo',
 };
 
 const RegisterScreen = ({ navigation, route }) => {
@@ -65,15 +66,46 @@ const RegisterScreen = ({ navigation, route }) => {
     gender: 'male',
     skills: '',
     whyVolunteer: '',
+    ngoName: '',
+    registrationNumber: '',
+    contactPerson: '',
+    areasOfOperation: '',
+    servicesOffered: '',
+    verificationDocuments: '',
   });
 
   const isVolunteer = role === USER_ROLES.VOLUNTEER;
+  const isNgo = role === USER_ROLES.NGO;
 
   const updateForm = (field, value) => {
     setFormData(prev => ({ ...prev, [field]: value }));
   };
 
   const validateForm = () => {
+    if (isNgo) {
+      if (!formData.ngoName.trim()) {
+        Alert.alert('Required', 'Please enter NGO name');
+        return false;
+      }
+      if (!formData.registrationNumber.trim()) {
+        Alert.alert('Required', 'Please enter registration number');
+        return false;
+      }
+      if (!formData.contactPerson.trim()) {
+        Alert.alert('Required', 'Please enter contact person');
+        return false;
+      }
+      if (!formData.areasOfOperation.trim()) {
+        Alert.alert('Required', 'Please enter areas of operation');
+        return false;
+      }
+      if (!formData.servicesOffered.trim()) {
+        Alert.alert('Required', 'Please enter services offered');
+        return false;
+      }
+      return true;
+    }
+
     if (!formData.fullName.trim()) {
       Alert.alert('Required', 'Please enter your full name');
       return false;
@@ -108,23 +140,44 @@ const RegisterScreen = ({ navigation, route }) => {
     setLoading(true);
     submittingRef.current = true;
     try {
-      const payload = {
-        email: email.trim(),
-        phone: phone,
-        role: role,
-        full_name: formData.fullName.trim(),
-        age: parseInt(formData.age),
-        city: formData.city.trim(),
-        address: formData.address.trim(),
-        gender: formData.gender,
-      };
+      const payload = isNgo
+        ? {
+            email: email.trim(),
+            phone,
+            role,
+            ngo_name: formData.ngoName.trim(),
+            registration_number: formData.registrationNumber.trim(),
+            contact_person: formData.contactPerson.trim(),
+            areas_of_operation: formData.areasOfOperation
+              .split(',')
+              .map((s) => s.trim())
+              .filter(Boolean),
+            services_offered: formData.servicesOffered
+              .split(',')
+              .map((s) => s.trim())
+              .filter(Boolean),
+            verification_documents: formData.verificationDocuments
+              .split(',')
+              .map((s) => s.trim())
+              .filter(Boolean),
+          }
+        : {
+            email: email.trim(),
+            phone: phone,
+            role: role,
+            full_name: formData.fullName.trim(),
+            age: parseInt(formData.age),
+            city: formData.city.trim(),
+            address: formData.address.trim(),
+            gender: formData.gender,
+          };
 
-      if (isVolunteer) {
+      if (isVolunteer && !isNgo) {
         payload.skills = formData.skills.split(',').map(s => s.trim()).filter(Boolean);
         payload.why_volunteer = formData.whyVolunteer.trim();
       }
 
-      const endpoint = isVolunteer ? '/register/volunteer' : '/register/senior';
+      const endpoint = isNgo ? '/register/ngo' : isVolunteer ? '/register/volunteer' : '/register/senior';
       console.log(`[DEBUG] Attempting POST to ${BACKEND_URL}${endpoint}`);
       console.log(`[DEBUG] Token being used: ${token ? 'Token exists' : 'Token is MISSING'}`);
       
@@ -148,22 +201,26 @@ const RegisterScreen = ({ navigation, route }) => {
 
       // Use profile data from response (server returns { profile: ... } for both senior and volunteer)
       const profileData = data.profile || data.user || {};
-      await authLogin(token, role, profileData);
+      const storedRole = profileData.role || role;
+      await authLogin(token, storedRole, profileData);
 
-      if (isVolunteer) {
-        Alert.alert(
-          'Registration Submitted',
-          'Your volunteer application has been submitted and is pending admin approval.',
-          [
-            { text: 'OK', onPress: () => navigation.reset({ index: 0, routes: [{ name: 'VolunteerPending' }] }) },
-          ]
-        );
-      } else {
-        navigation.reset({
-          index: 0,
-          routes: [{ name: 'ElderlyApp' }],
-        });
+      if (storedRole === 'volunteer_pending') {
+        navigation.reset({ index: 0, routes: [{ name: 'VolunteerPending' }] });
+        return;
       }
+      if (storedRole === 'ngo_pending') {
+        navigation.reset({ index: 0, routes: [{ name: 'NGOPending' }] });
+        return;
+      }
+      if (storedRole === 'ngo') {
+        navigation.reset({ index: 0, routes: [{ name: 'NGOApp' }] });
+        return;
+      }
+
+      navigation.reset({
+        index: 0,
+        routes: [{ name: 'ElderlyApp' }],
+      });
     } catch (error) {
       console.error('Registration error:', error);
       Alert.alert('Error', 'Failed to register. Please try again.');
@@ -219,34 +276,113 @@ const RegisterScreen = ({ navigation, route }) => {
                     <Text style={[styles.roleCardTitle, { color: '#4CAF50' }]}>Volunteer</Text>
                     <Text style={styles.roleCardDesc}>I want to help and support seniors</Text>
                   </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[styles.roleCard, styles.ngoCard]}
+                    onPress={() => setRole(USER_ROLES.NGO)}
+                  >
+                    <MaterialCommunityIcons name="office-building" size={48} color="#1565C0" />
+                    <Text style={[styles.roleCardTitle, { color: '#1565C0' }]}>NGO</Text>
+                    <Text style={styles.roleCardDesc}>We want to support seniors as a verified organization</Text>
+                  </TouchableOpacity>
                 </View>
               </>
             ) : (
               <>
                 <View style={styles.roleBadge}>
                   <MaterialCommunityIcons 
-                    name={isVolunteer ? 'hand-heart' : 'account'} 
+                    name={isNgo ? 'office-building' : isVolunteer ? 'hand-heart' : 'account'} 
                     size={24} 
                     color={colors.neutral.white} 
                   />
                   <Text style={styles.roleBadgeText}>
-                    {isVolunteer ? 'Volunteer Registration' : 'Senior Registration'}
+                    {isNgo ? 'NGO Application' : isVolunteer ? 'Volunteer Registration' : 'Senior Registration'}
                   </Text>
                 </View>
 
                 <View style={styles.formContainer}>
-                  <Text style={styles.sectionTitle}>Personal Information</Text>
+                  <Text style={styles.sectionTitle}>{isNgo ? 'Organization Information' : 'Personal Information'}</Text>
                   
-                  <View style={styles.inputGroup}>
-                    <Text style={styles.inputLabel}>Full Name *</Text>
-                    <TextInput
-                      style={styles.input}
-                      placeholder="Enter your full name"
-                      placeholderTextColor={colors.neutral.gray}
-                      value={formData.fullName}
-                      onChangeText={(text) => updateForm('fullName', text)}
-                    />
-                  </View>
+                  {isNgo ? (
+                    <>
+                      <View style={styles.inputGroup}>
+                        <Text style={styles.inputLabel}>NGO Name *</Text>
+                        <TextInput
+                          style={styles.input}
+                          placeholder="Enter NGO name"
+                          placeholderTextColor={colors.neutral.gray}
+                          value={formData.ngoName}
+                          onChangeText={(text) => updateForm('ngoName', text)}
+                        />
+                      </View>
+
+                      <View style={styles.inputGroup}>
+                        <Text style={styles.inputLabel}>Registration Number *</Text>
+                        <TextInput
+                          style={styles.input}
+                          placeholder="Trust / Society / NGO ID"
+                          placeholderTextColor={colors.neutral.gray}
+                          value={formData.registrationNumber}
+                          onChangeText={(text) => updateForm('registrationNumber', text)}
+                        />
+                      </View>
+
+                      <View style={styles.inputGroup}>
+                        <Text style={styles.inputLabel}>Contact Person *</Text>
+                        <TextInput
+                          style={styles.input}
+                          placeholder="Contact person name"
+                          placeholderTextColor={colors.neutral.gray}
+                          value={formData.contactPerson}
+                          onChangeText={(text) => updateForm('contactPerson', text)}
+                        />
+                      </View>
+
+                      <View style={styles.inputGroup}>
+                        <Text style={styles.inputLabel}>Areas of Operation * (comma separated)</Text>
+                        <TextInput
+                          style={styles.input}
+                          placeholder="e.g., Pune, Mumbai, Nashik"
+                          placeholderTextColor={colors.neutral.gray}
+                          value={formData.areasOfOperation}
+                          onChangeText={(text) => updateForm('areasOfOperation', text)}
+                        />
+                      </View>
+
+                      <View style={styles.inputGroup}>
+                        <Text style={styles.inputLabel}>Services Offered * (comma separated)</Text>
+                        <TextInput
+                          style={styles.input}
+                          placeholder="e.g., medical, food, counselling, emergency"
+                          placeholderTextColor={colors.neutral.gray}
+                          value={formData.servicesOffered}
+                          onChangeText={(text) => updateForm('servicesOffered', text)}
+                        />
+                      </View>
+
+                      <View style={styles.inputGroup}>
+                        <Text style={styles.inputLabel}>Verification Documents (URLs/IDs, comma separated)</Text>
+                        <TextInput
+                          style={styles.input}
+                          placeholder="e.g., https://.../doc1.pdf, https://.../doc2.pdf"
+                          placeholderTextColor={colors.neutral.gray}
+                          value={formData.verificationDocuments}
+                          onChangeText={(text) => updateForm('verificationDocuments', text)}
+                        />
+                      </View>
+                    </>
+                  ) : (
+                    <>
+                      <View style={styles.inputGroup}>
+                        <Text style={styles.inputLabel}>Full Name *</Text>
+                        <TextInput
+                          style={styles.input}
+                          placeholder="Enter your full name"
+                          placeholderTextColor={colors.neutral.gray}
+                          value={formData.fullName}
+                          onChangeText={(text) => updateForm('fullName', text)}
+                        />
+                      </View>
 
                   <View style={styles.inputGroup}>
                     <Text style={styles.inputLabel}>Age *</Text>
@@ -356,6 +492,9 @@ const RegisterScreen = ({ navigation, route }) => {
                     </>
                   )}
 
+                    </>
+                  )}
+
                   <View style={styles.buttonContainer}>
                     <TouchableOpacity 
                       style={styles.backRoleButton}
@@ -373,7 +512,7 @@ const RegisterScreen = ({ navigation, route }) => {
                         <ActivityIndicator color={colors.neutral.white} size="small" />
                       ) : (
                         <Text style={styles.submitButtonText}>
-                          {isVolunteer ? 'Submit Application' : 'Complete Registration'}
+                          {isVolunteer || isNgo ? 'Submit Application' : 'Complete Registration'}
                         </Text>
                       )}
                     </TouchableOpacity>
@@ -437,6 +576,10 @@ const styles = StyleSheet.create({
   volunteerCard: {
     borderWidth: 2,
     borderColor: '#4CAF50',
+  },
+  ngoCard: {
+    borderWidth: 2,
+    borderColor: '#1565C0',
   },
   roleCardTitle: {
     fontSize: 20,

@@ -31,6 +31,16 @@ const emitAdminUpdate = (payload) => {
   } catch {}
 };
 
+const emitNgoUpdate = ({ ngoId, ...payload } = {}) => {
+  try {
+    if (ngoId) {
+      io.to(`ngo:${ngoId}`).emit('ngo:update', { ngoId, ...payload, ts: new Date().toISOString() });
+      return;
+    }
+    io.to('ngos').emit('ngo:update', { ...payload, ts: new Date().toISOString() });
+  } catch {}
+};
+
 // In-memory presence and session routing
 const onlineVolunteers = new Map(); // volunteerId -> socketId
 const sessions = new Map(); // conversationId -> { seniorId, volunteerId }
@@ -513,6 +523,11 @@ io.on('connection', (socket) => {
       socket.join('admins');
       console.log(`[SOCKET] Admin ${userId} joined admins room`);
     }
+    if (role === 'NGO' || role === 'ngo') {
+      socket.join('ngos');
+      if (userId) socket.join(`ngo:${userId}`);
+      console.log(`[SOCKET] NGO ${userId} joined ngos room`);
+    }
     if (role === 'VOLUNTEER') {
       onlineVolunteers.set(userId, socket.id);
       setVolunteerAvailability({ volunteerId: userId, isOnline: true }).catch(() => {});
@@ -970,6 +985,47 @@ const ensureAdmin = (req, res, next) => {
     console.log(`[AUTH] Admin access granted for user ${req.user.id}`);
     next();
   });
+};
+
+const ensureNgo = (req, res, next) => {
+  ensureAuth(req, res, () => {
+    if (!req.user) {
+      return res.status(403).json({ error: 'Forbidden: User not authenticated' });
+    }
+
+    const role = String(req.user.role || '').toLowerCase();
+    if (role !== 'ngo') {
+      return res.status(403).json({ error: 'Forbidden: NGO access required', userRole: req.user.role });
+    }
+
+    const isBlocked = req.user.is_blocked === true || req.user.blocked === true;
+    if (isBlocked) {
+      return res.status(403).json({ error: 'Forbidden: Account disabled' });
+    }
+
+    const isApproved = req.user.is_approved === true;
+    const isVerified = req.user.is_verified === true || req.user.verified === true;
+    if (!isApproved || !isVerified) {
+      return res.status(403).json({ error: 'Forbidden: NGO not approved', approved: !!isApproved, verified: !!isVerified });
+    }
+
+    next();
+  });
+};
+
+const logNgoActivity = async ({ ngoId, action, entityType = '', entityId = null, details = {} }) => {
+  try {
+    await supabase.from('ngo_activity_logs').insert({
+      ngo_id: ngoId,
+      action: String(action || ''),
+      entity_type: String(entityType || ''),
+      entity_id: entityId,
+      details,
+      created_at: new Date().toISOString(),
+    });
+  } catch {
+    // best-effort
+  }
 };
 
 const avatarForGender = (gender) => {
@@ -1667,9 +1723,807 @@ app.post('/register/ngo', ensureAuth, async (req, res) => {
       console.warn(`[WARN] Failed to insert into pending_approvals for NGO:`, err.message);
     }
 
+    try {
+      emitAdminUpdate({ type: 'ngo', action: 'applied', ngo: parseProfileData(data) });
+    } catch {}
+
     res.json({ profile: parseProfileData(data) });
   } catch (e) {
     console.error(`[ERROR] NGO registration failed:`, e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/auth/check-ngo-status', ensureAuth, async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from(TABLES.USERS)
+      .select('*')
+      .eq('id', req.user.id)
+      .single();
+    if (error) throw error;
+    res.json({ user: parseProfileData(data) });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/ngo/me', ensureNgo, async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from(TABLES.USERS)
+      .select('*')
+      .eq('id', req.user.id)
+      .single();
+    if (error) throw error;
+    const u = parseProfileData(data);
+    const regions = Array.isArray(u.ngo_regions)
+      ? u.ngo_regions
+      : Array.isArray(u.regions)
+      ? u.regions
+      : [];
+    res.json({
+      ngo: {
+        id: u.id,
+        name: u.name || u.ngo_name || 'NGO',
+        verified: u.is_verified === true || u.verified === true,
+        regions,
+        serviceTypes: Array.isArray(u.ngo_service_types)
+          ? u.ngo_service_types
+          : Array.isArray(u.service_types)
+          ? u.service_types
+          : [],
+        contactPerson: u.contact_person || u.contactPerson || null,
+        phone: u.phone || null,
+        email: u.email || null,
+        registrationNumber: u.registration_number || u.registrationNumber || null,
+        ngo_profile_update_status: u.ngo_profile_update_status || null,
+        ngo_profile_update_requested_at: u.ngo_profile_update_requested_at || null,
+        ngo_profile_update_decided_at: u.ngo_profile_update_decided_at || null,
+        ngo_profile_update_reject_reason: u.ngo_profile_update_reject_reason || null,
+        ngo_profile_update_request: u.ngo_profile_update_request || null,
+      },
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/admin/ngos/:id/profile-update/approve', ensureAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const now = new Date().toISOString();
+
+    const { data, error } = await supabase.from(TABLES.USERS).select('*').eq('id', id).single();
+    if (error) throw error;
+    const u = parseProfileData(data);
+
+    const reqPatch = u?.ngo_profile_update_request && typeof u.ngo_profile_update_request === 'object'
+      ? u.ngo_profile_update_request
+      : {};
+
+    const nextPhone = reqPatch.phone !== undefined ? String(reqPatch.phone || '') : undefined;
+    const nextEmail = reqPatch.email !== undefined ? String(reqPatch.email || '') : undefined;
+    const nextContact = reqPatch.contactPerson !== undefined ? String(reqPatch.contactPerson || '') : undefined;
+
+    // Update base users table for canonical phone/email
+    try {
+      const updateUser = {};
+      if (nextPhone !== undefined) updateUser.phone = nextPhone || null;
+      if (nextEmail !== undefined) updateUser.email = nextEmail || null;
+      if (Object.keys(updateUser).length) {
+        updateUser.updated_at = now;
+        await supabase.from(TABLES.USERS).update(updateUser).eq('id', id);
+      }
+    } catch {}
+
+    // Update NGOs table best-effort
+    try {
+      const updateNgo = { updated_at: now };
+      if (nextPhone !== undefined) updateNgo.phone = nextPhone || null;
+      if (nextEmail !== undefined) updateNgo.email = nextEmail || null;
+      if (nextContact !== undefined) updateNgo.contact_person = nextContact || null;
+      await supabase.from(TABLES.NGOS).upsert({ user_id: id, ...updateNgo }, { onConflict: 'user_id' });
+    } catch {}
+
+    // Persist metadata changes and mark approved
+    const updated = await writeUserMetadata(id, {
+      ...(nextContact !== undefined ? { contact_person: nextContact || null, contactPerson: nextContact || null } : {}),
+      ngo_profile_update_status: 'approved',
+      ngo_profile_update_decided_at: now,
+      ngo_profile_update_reject_reason: null,
+    });
+
+    // pending_approvals best-effort
+    try {
+      await supabase
+        .from(TABLES.PENDING_APPROVALS)
+        .update({ status: 'approved', decided_at: now })
+        .eq('uid', id);
+    } catch {}
+
+    emitAdminUpdate({ type: 'ngo', action: 'profile_update_approved', ngo: updated });
+    emitNgoUpdate({ ngoId: id, type: 'ngo', action: 'profile_update_approved', ngo: updated });
+    try {
+      await logNgoActivity({ ngoId: id, action: 'profile_update_approved', entityType: 'ngo', entityId: id, details: reqPatch });
+    } catch {}
+    res.json({ ngo: updated });
+  } catch (e) {
+    console.error('[ERROR] Failed to approve NGO profile update:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/admin/ngos/:id/profile-update/reject', ensureAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { reason = '' } = req.body || {};
+    const now = new Date().toISOString();
+
+    const updated = await writeUserMetadata(id, {
+      ngo_profile_update_status: 'rejected',
+      ngo_profile_update_decided_at: now,
+      ngo_profile_update_reject_reason: String(reason || ''),
+    });
+
+    try {
+      await supabase
+        .from(TABLES.PENDING_APPROVALS)
+        .update({ status: 'rejected', decided_at: now })
+        .eq('uid', id);
+    } catch {}
+
+    emitAdminUpdate({ type: 'ngo', action: 'profile_update_rejected', ngo: updated });
+    emitNgoUpdate({ ngoId: id, type: 'ngo', action: 'profile_update_rejected', ngo: updated });
+    try {
+      await logNgoActivity({ ngoId: id, action: 'profile_update_rejected', entityType: 'ngo', entityId: id, details: { reason } });
+    } catch {}
+    res.json({ ngo: updated });
+  } catch (e) {
+    console.error('[ERROR] Failed to reject NGO profile update:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/ngo/dashboard', ensureNgo, async (req, res) => {
+  try {
+    const ngoRegions = Array.isArray(req.user.ngo_regions)
+      ? req.user.ngo_regions
+      : Array.isArray(req.user.regions)
+      ? req.user.regions
+      : [];
+    const regions = Array.isArray(ngoRegions) ? ngoRegions : [];
+
+    const [escalatedRes, sosRes] = await Promise.all([
+      supabase
+        .from(TABLES.HELP_REQUESTS)
+        .select('id,senior_id,status')
+        .eq('status', 'escalated')
+        .order('created_at', { ascending: false })
+        .limit(500),
+      supabase
+        .from(TABLES.SOS_ALERTS)
+        .select('id,senior_id,user_id,status')
+        .eq('status', 'active')
+        .order('created_at', { ascending: false })
+        .limit(500),
+    ]);
+
+    const escalated = Array.isArray(escalatedRes.data) ? escalatedRes.data : [];
+    const sos = Array.isArray(sosRes.data) ? sosRes.data : [];
+
+    const seniorIds = Array.from(
+      new Set(
+        [...escalated.map((r) => r.senior_id), ...sos.map((s) => s.senior_id || s.user_id)].filter(Boolean)
+      )
+    );
+
+    const seniorsById = new Map();
+    if (seniorIds.length) {
+      try {
+        const { data: seniors } = await supabase.from(TABLES.USERS).select('*').in('id', seniorIds);
+        (seniors || []).forEach((u) => seniorsById.set(u.id, parseProfileData(u)));
+      } catch {}
+    }
+
+    const inRegion = (seniorId) => {
+      if (!regions.length) return true;
+      const s = seniorsById.get(seniorId);
+      const region = s?.region || s?.city || s?.area || null;
+      if (!region) return false;
+      return regions.includes(region);
+    };
+
+    const escalatedActive = escalated.filter((r) => inRegion(r.senior_id)).length;
+    const emergenciesActive = sos.filter((s) => inRegion(s.senior_id || s.user_id)).length;
+
+    let availableVolunteers = 0;
+    try {
+      const { data: vols } = await supabase
+        .from(TABLES.USERS)
+        .select('*')
+        .eq('role', 'volunteer')
+        .limit(500);
+      const parsed = (vols || []).map(parseProfileData);
+      availableVolunteers = parsed.filter((v) => {
+        if (v.is_online !== true) return false;
+        if (!regions.length) return true;
+        const r = v.region || v.city || v.area;
+        return r && regions.includes(r);
+      }).length;
+    } catch {}
+
+    res.json({
+      overview: {
+        escalatedActive,
+        emergenciesActive,
+        availableVolunteers,
+        regions,
+      },
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+const isTableMissingError = (error) => {
+  const code = error?.code;
+  const msg = String(error?.message || '');
+  if (code === 'PGRST205') return true;
+  if (msg.includes('Could not find the table')) return true;
+  if (msg.includes('relation') && msg.includes('does not exist')) return true;
+  return false;
+};
+
+const timeAgoMs = (iso) => {
+  const t = Date.parse(iso || '') || 0;
+  if (!t) return null;
+  return Math.max(0, Date.now() - t);
+};
+
+const uniqueById = (items) => {
+  const seen = new Set();
+  const out = [];
+  (items || []).forEach((i) => {
+    const id = i?.id;
+    if (!id) return;
+    if (seen.has(String(id))) return;
+    seen.add(String(id));
+    out.push(i);
+  });
+  return out;
+};
+
+app.get('/ngo/requests', ensureNgo, async (req, res) => {
+  try {
+    const { status = 'escalated', limit = 200 } = req.query || {};
+    const lim = Math.min(500, Math.max(1, Number(limit) || 200));
+
+    const ngoRegions = Array.isArray(req.user.ngo_regions)
+      ? req.user.ngo_regions
+      : Array.isArray(req.user.regions)
+      ? req.user.regions
+      : [];
+    const regions = Array.isArray(ngoRegions) ? ngoRegions : [];
+
+    const { data: allRequests, error } = await supabase
+      .from(TABLES.HELP_REQUESTS)
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(Math.min(500, lim));
+
+    if (error) {
+      if (isTableMissingError(error)) {
+        return res.status(500).json({
+          error: 'Database table not configured',
+          code: 'TABLE_NOT_FOUND',
+          message: 'help_requests table does not exist. Please run the SQL setup script in Supabase.',
+          instructions: 'Run server/SETUP_HELP_REQUESTS_TABLE.sql in your Supabase SQL editor'
+        });
+      }
+      throw error;
+    }
+
+    const reqs = Array.isArray(allRequests) ? allRequests : [];
+    const candidates = [];
+
+    const pendingTimeoutMs = 10 * 60 * 1000;
+
+    reqs.forEach((r) => {
+      const s = String(r.status || '').toLowerCase();
+      const ageMs = timeAgoMs(r.created_at);
+      const isUrgent = String(r.priority || '').toLowerCase() === 'high' || String(r.priority || '').toLowerCase() === 'urgent';
+      const isTimedOut = s === 'pending' && !r.volunteer_id && typeof ageMs === 'number' && ageMs >= pendingTimeoutMs;
+      const isEscalated = s === 'escalated';
+
+      if (status === 'all') {
+        if (s !== 'completed' && s !== 'cancelled') candidates.push(r);
+        return;
+      }
+
+      if (status === 'escalated') {
+        if (isEscalated || isTimedOut || isUrgent) candidates.push(r);
+      } else if (status === 'pending') {
+        if (s === 'pending') candidates.push(r);
+      } else {
+        if (s === String(status).toLowerCase()) candidates.push(r);
+      }
+    });
+
+    const uniq = uniqueById(candidates).slice(0, lim);
+    const seniorIds = Array.from(new Set(uniq.map((r) => r.senior_id).filter(Boolean)));
+
+    const seniorsById = new Map();
+    if (seniorIds.length) {
+      try {
+        const { data: seniors } = await supabase.from(TABLES.USERS).select('*').in('id', seniorIds);
+        (seniors || []).map(parseProfileData).forEach((u) => seniorsById.set(u.id, u));
+      } catch {}
+    }
+
+    const inRegion = (seniorId) => {
+      if (!regions.length) return true;
+      const s = seniorsById.get(seniorId);
+      const region = s?.region || s?.city || s?.area || null;
+      if (!region) return false;
+      return regions.includes(region);
+    };
+
+    const filtered = uniq.filter((r) => inRegion(r.senior_id));
+    const enriched = filtered.map((r) => ({
+      ...r,
+      senior: r.senior_id ? seniorsById.get(r.senior_id) || { id: r.senior_id } : null,
+    }));
+
+    res.json({ requests: enriched });
+  } catch (e) {
+    console.error('[ERROR] Failed to fetch NGO requests:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/ngo/requests/:id/assign-volunteer', ensureNgo, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { volunteerId } = req.body || {};
+    if (!volunteerId) return res.status(400).json({ error: 'volunteerId required' });
+
+    const { data: helpRequest, error: fetchError } = await supabase
+      .from(TABLES.HELP_REQUESTS)
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (fetchError || !helpRequest) {
+      return res.status(404).json({ error: 'Help request not found' });
+    }
+
+    const status = String(helpRequest.status || '').toLowerCase();
+    if (status === 'completed' || status === 'cancelled') {
+      return res.status(400).json({ error: `Request is already ${helpRequest.status}` });
+    }
+
+    const now = new Date().toISOString();
+    const { data: updatedRequest, error: updateError } = await supabase
+      .from(TABLES.HELP_REQUESTS)
+      .update({
+        volunteer_id: String(volunteerId),
+        status: 'accepted',
+        accepted_at: now,
+        updated_at: now,
+      })
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (updateError) throw updateError;
+
+    emitAdminUpdate({ type: 'help_request', action: 'assigned_by_ngo', request: updatedRequest, ngoId: req.user.id });
+    emitNgoUpdate({ ngoId: req.user.id, type: 'help_request', action: 'assigned', request: updatedRequest });
+    await logNgoActivity({ ngoId: req.user.id, action: 'assign_volunteer', entityType: 'help_request', entityId: id, details: { volunteerId } });
+
+    const seniorId = updatedRequest?.senior_id;
+    let conversation = null;
+    try {
+      const { data: existingConv } = await supabase
+        .from(TABLES.CONVERSATIONS)
+        .select('*')
+        .eq('senior_id', seniorId)
+        .eq('companion_id', String(volunteerId));
+
+      if (Array.isArray(existingConv) && existingConv.length > 0) {
+        conversation = existingConv[0];
+      } else {
+        const { data: newConv } = await supabase
+          .from(TABLES.CONVERSATIONS)
+          .insert({ senior_id: seniorId, companion_id: String(volunteerId) })
+          .select()
+          .single();
+        conversation = newConv;
+      }
+    } catch {
+      conversation = { id: `conv-${seniorId}-${volunteerId}` };
+    }
+
+    if (conversation) {
+      const convRoom = `conv:${conversation.id}`;
+      const seniorSocketId = userSockets.get(seniorId);
+      const volunteerSocketId = onlineVolunteers.get(String(volunteerId)) || userSockets.get(String(volunteerId));
+      if (seniorSocketId) io.sockets.sockets.get(seniorSocketId)?.join(convRoom);
+      if (volunteerSocketId) io.sockets.sockets.get(volunteerSocketId)?.join(convRoom);
+      sessions.set(conversation.id, { seniorId, volunteerId: String(volunteerId) });
+
+      const startedPayload = {
+        conversationId: conversation.id,
+        seniorId,
+        volunteerId: String(volunteerId),
+        requestType: updatedRequest?.category || 'help',
+      };
+      if (seniorSocketId) io.to(seniorSocketId).emit('session:started', startedPayload);
+      if (volunteerSocketId) io.to(volunteerSocketId).emit('session:started', startedPayload);
+    }
+
+    res.json({ request: updatedRequest, conversation });
+  } catch (e) {
+    console.error('[ERROR] Failed to assign volunteer by NGO:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/ngo/requests/:id/handled', ensureNgo, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { notes = '' } = req.body || {};
+    const now = new Date().toISOString();
+    const { data, error } = await supabase
+      .from(TABLES.HELP_REQUESTS)
+      .update({
+        status: 'completed',
+        volunteer_id: null,
+        completed_at: now,
+        updated_at: now,
+      })
+      .eq('id', id)
+      .select()
+      .single();
+    if (error) throw error;
+
+    emitAdminUpdate({ type: 'help_request', action: 'handled_by_ngo', request: data, ngoId: req.user.id });
+    emitNgoUpdate({ ngoId: req.user.id, type: 'help_request', action: 'handled', request: data });
+    await logNgoActivity({ ngoId: req.user.id, action: 'handled_by_ngo', entityType: 'help_request', entityId: id, details: { notes } });
+
+    res.json({ request: data });
+  } catch (e) {
+    console.error('[ERROR] Failed to mark request handled by NGO:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/ngo/requests/:id/close', ensureNgo, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { resolution = '' } = req.body || {};
+    const now = new Date().toISOString();
+    const { data, error } = await supabase
+      .from(TABLES.HELP_REQUESTS)
+      .update({ status: 'completed', completed_at: now, updated_at: now })
+      .eq('id', id)
+      .select()
+      .single();
+    if (error) throw error;
+    emitAdminUpdate({ type: 'help_request', action: 'closed_by_ngo', request: data, ngoId: req.user.id });
+    emitNgoUpdate({ ngoId: req.user.id, type: 'help_request', action: 'closed', request: data });
+    await logNgoActivity({ ngoId: req.user.id, action: 'close_case', entityType: 'help_request', entityId: id, details: { resolution } });
+    res.json({ request: data });
+  } catch (e) {
+    console.error('[ERROR] Failed to close request by NGO:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/ngo/requests/:id/reject', ensureNgo, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { reason = '' } = req.body || {};
+
+    const { data: existing, error: fetchError } = await supabase
+      .from(TABLES.HELP_REQUESTS)
+      .select('*')
+      .eq('id', id)
+      .single();
+    if (fetchError || !existing) return res.status(404).json({ error: 'Help request not found' });
+
+    const now = new Date().toISOString();
+    const prefix = `[NGO_REJECTED] ${String(reason || '').trim()}`.trim();
+    const nextDescription = prefix ? `${prefix}${existing.description ? `\n${existing.description}` : ''}` : (existing.description || '');
+
+    const { data, error } = await supabase
+      .from(TABLES.HELP_REQUESTS)
+      .update({ status: 'cancelled', description: nextDescription, updated_at: now })
+      .eq('id', id)
+      .select()
+      .single();
+    if (error) throw error;
+
+    emitAdminUpdate({ type: 'help_request', action: 'rejected_by_ngo', request: data, ngoId: req.user.id });
+    emitNgoUpdate({ ngoId: req.user.id, type: 'help_request', action: 'rejected', request: data });
+    await logNgoActivity({ ngoId: req.user.id, action: 'reject', entityType: 'help_request', entityId: id, details: { reason } });
+
+    res.json({ request: data });
+  } catch (e) {
+    console.error('[ERROR] Failed to reject request by NGO:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/ngo/case-history', ensureNgo, async (req, res) => {
+  try {
+    const { limit = 200 } = req.query || {};
+    const lim = Math.min(500, Math.max(1, Number(limit) || 200));
+    const ngoRegions = Array.isArray(req.user.ngo_regions)
+      ? req.user.ngo_regions
+      : Array.isArray(req.user.regions)
+      ? req.user.regions
+      : [];
+    const regions = Array.isArray(ngoRegions) ? ngoRegions : [];
+
+    let { data: requests, error } = await supabase
+      .from(TABLES.HELP_REQUESTS)
+      .select('*')
+      .in('status', ['completed', 'cancelled'])
+      .order('completed_at', { ascending: false })
+      .order('updated_at', { ascending: false })
+      .limit(lim);
+
+    if (error) {
+      if (isTableMissingError(error)) {
+        return res.status(500).json({
+          error: 'Database table not configured',
+          code: 'TABLE_NOT_FOUND',
+          message: 'help_requests table does not exist. Please run the SQL setup script in Supabase.',
+          instructions: 'Run server/SETUP_HELP_REQUESTS_TABLE.sql in your Supabase SQL editor'
+        });
+      }
+      throw error;
+    }
+
+    requests = Array.isArray(requests) ? requests : [];
+    const seniorIds = Array.from(new Set(requests.map((r) => r.senior_id).filter(Boolean)));
+    const volunteerIds = Array.from(new Set(requests.map((r) => r.volunteer_id).filter(Boolean)));
+
+    const usersById = new Map();
+    const allIds = Array.from(new Set([...seniorIds, ...volunteerIds]));
+    if (allIds.length) {
+      try {
+        const { data: users } = await supabase.from(TABLES.USERS).select('*').in('id', allIds);
+        (users || []).map(parseProfileData).forEach((u) => usersById.set(u.id, u));
+      } catch {}
+    }
+
+    const inRegion = (seniorId) => {
+      if (!regions.length) return true;
+      const s = usersById.get(seniorId);
+      const region = s?.region || s?.city || s?.area || null;
+      if (!region) return false;
+      return regions.includes(region);
+    };
+
+    const enriched = requests
+      .filter((r) => inRegion(r.senior_id))
+      .map((r) => ({
+        ...r,
+        senior: r.senior_id ? usersById.get(r.senior_id) || { id: r.senior_id } : null,
+        volunteer: r.volunteer_id ? usersById.get(r.volunteer_id) || { id: r.volunteer_id } : null,
+      }));
+
+    res.json({ cases: enriched });
+  } catch (e) {
+    console.error('[ERROR] Failed to fetch NGO case history:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/ngo/volunteers', ensureNgo, async (req, res) => {
+  try {
+    const { limit = 200 } = req.query || {};
+    const lim = Math.min(500, Math.max(1, Number(limit) || 200));
+    const ngoRegions = Array.isArray(req.user.ngo_regions)
+      ? req.user.ngo_regions
+      : Array.isArray(req.user.regions)
+      ? req.user.regions
+      : [];
+    const regions = Array.isArray(ngoRegions) ? ngoRegions : [];
+
+    const { data, error } = await supabase
+      .from(TABLES.USERS)
+      .select('*')
+      .eq('role', 'volunteer')
+      .order('updated_at', { ascending: false })
+      .limit(lim);
+    if (error) throw error;
+    const volunteers = (data || []).map(parseProfileData).filter((v) => {
+      if (!regions.length) return true;
+      const r = v.region || v.city || v.area;
+      return r && regions.includes(r);
+    });
+    res.json({ volunteers });
+  } catch (e) {
+    console.error('[ERROR] Failed to fetch NGO volunteers:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/ngo/emergencies', ensureNgo, async (req, res) => {
+  try {
+    const { status = 'active', limit = 200 } = req.query || {};
+    const lim = Math.min(500, Math.max(1, Number(limit) || 200));
+
+    const ngoRegions = Array.isArray(req.user.ngo_regions)
+      ? req.user.ngo_regions
+      : Array.isArray(req.user.regions)
+      ? req.user.regions
+      : [];
+    const regions = Array.isArray(ngoRegions) ? ngoRegions : [];
+
+    let query = supabase.from(TABLES.SOS_ALERTS).select('*');
+    const st = String(status || 'active').toLowerCase();
+    if (st !== 'all') query = query.eq('status', st);
+    const { data, error } = await query.order('created_at', { ascending: false }).limit(lim);
+    if (error) {
+      if (isTableMissingError(error)) {
+        return res.status(500).json({
+          error: 'Database table not configured',
+          code: 'TABLE_NOT_FOUND',
+          message: 'sos_alerts table does not exist. Please create it in Supabase.'
+        });
+      }
+      throw error;
+    }
+
+    const alerts = Array.isArray(data) ? data : [];
+    const seniorIds = Array.from(
+      new Set(alerts.map((a) => a.senior_id || a.user_id || a.seniorId).filter(Boolean))
+    );
+    const seniorsById = new Map();
+    if (seniorIds.length) {
+      try {
+        const { data: seniors } = await supabase.from(TABLES.USERS).select('*').in('id', seniorIds);
+        (seniors || []).map(parseProfileData).forEach((u) => seniorsById.set(u.id, u));
+      } catch {}
+    }
+
+    const inRegion = (seniorId) => {
+      if (!regions.length) return true;
+      const s = seniorsById.get(seniorId);
+      const region = s?.region || s?.city || s?.area || null;
+      if (!region) return false;
+      return regions.includes(region);
+    };
+
+    const enriched = alerts
+      .map((a) => {
+        const sid = a.senior_id || a.user_id || a.seniorId;
+        return { ...a, senior: sid ? seniorsById.get(sid) || { id: sid } : null };
+      })
+      .filter((a) => {
+        const sid = a.senior_id || a.user_id || a.seniorId;
+        return sid ? inRegion(sid) : true;
+      });
+
+    res.json({ emergencies: enriched });
+  } catch (e) {
+    console.error('[ERROR] Failed to fetch NGO emergencies:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/ngo/emergencies/:id/close', ensureNgo, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { notes = '' } = req.body || {};
+    const now = new Date().toISOString();
+
+    const { data, error } = await supabase
+      .from(TABLES.SOS_ALERTS)
+      .update({ status: 'resolved', resolution: String(notes || ''), resolved_at: now })
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) {
+      if (isTableMissingError(error)) {
+        return res.status(500).json({
+          error: 'Database table not configured',
+          code: 'TABLE_NOT_FOUND',
+          message: 'sos_alerts table does not exist. Please create it in Supabase.'
+        });
+      }
+      throw error;
+    }
+
+    emitAdminUpdate({ type: 'sos_alert', action: 'closed_by_ngo', alert: data, ngoId: req.user.id });
+    emitNgoUpdate({ ngoId: req.user.id, type: 'sos_alert', action: 'closed', alert: data });
+    await logNgoActivity({ ngoId: req.user.id, action: 'close_emergency', entityType: 'sos_alert', entityId: id, details: { notes } });
+
+    res.json({ emergency: data });
+  } catch (e) {
+    console.error('[ERROR] Failed to close emergency by NGO:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/ngo/profile/request-update', ensureNgo, async (req, res) => {
+  try {
+    const { contactPerson, phone, email } = req.body || {};
+    const patch = {
+      contactPerson: contactPerson !== undefined ? String(contactPerson) : undefined,
+      phone: phone !== undefined ? String(phone) : undefined,
+      email: email !== undefined ? String(email) : undefined,
+    };
+    Object.keys(patch).forEach((k) => patch[k] === undefined && delete patch[k]);
+
+    const now = new Date().toISOString();
+    const updated = await writeUserMetadata(req.user.id, {
+      ngo_profile_update_requested_at: now,
+      ngo_profile_update_request: patch,
+      ngo_profile_update_status: 'pending',
+    });
+
+    try {
+      await supabase.from(TABLES.PENDING_APPROVALS).insert({
+        uid: req.user.id,
+        email: req.user.email,
+        full_name: req.user.name || req.user.ngo_name || 'NGO',
+        phone: req.user.phone || null,
+        role: 'ngo_profile_update',
+        status: 'pending',
+        created_at: now,
+      });
+    } catch {}
+
+    emitAdminUpdate({ type: 'ngo', action: 'profile_update_requested', ngo: updated });
+    emitNgoUpdate({ ngoId: req.user.id, type: 'ngo', action: 'profile_update_requested', ngo: updated });
+    await logNgoActivity({ ngoId: req.user.id, action: 'profile_update_requested', entityType: 'ngo', entityId: req.user.id, details: patch });
+    res.json({ ngo: updated });
+  } catch (e) {
+    console.error('[ERROR] Failed to request NGO profile update:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/sos-alerts', ensureAuth, async (req, res) => {
+  try {
+    const { message = 'SOS alert triggered', type = 'panic' } = req.body || {};
+    const now = new Date().toISOString();
+    const { data, error } = await supabase
+      .from(TABLES.SOS_ALERTS)
+      .insert({
+        senior_id: req.user.id,
+        message: String(message || ''),
+        type: String(type || ''),
+        status: 'active',
+        created_at: now,
+      })
+      .select()
+      .single();
+
+    if (error) {
+      if (isTableMissingError(error)) {
+        return res.status(500).json({
+          error: 'Database table not configured',
+          code: 'TABLE_NOT_FOUND',
+          message: 'sos_alerts table does not exist. Please create it in Supabase.'
+        });
+      }
+      throw error;
+    }
+
+    emitAdminUpdate({ type: 'sos_alert', action: 'created', alert: data });
+    emitNgoUpdate({ type: 'sos_alert', action: 'created', alert: data });
+
+    res.status(201).json({ alert: data });
+  } catch (e) {
+    console.error('[ERROR] Failed to create SOS alert:', e);
     res.status(500).json({ error: e.message });
   }
 });
@@ -2477,10 +3331,17 @@ app.get('/admin/stats', ensureAdmin, async (req, res) => {
     const results = await Promise.all([
       supabase.from(TABLES.USERS).select('*', { count: 'exact', head: true }).or('role.eq.elderly,role.eq.senior'),
       supabase.from(TABLES.USERS).select('*', { count: 'exact', head: true }).or('role.eq.volunteer,role.eq.caregiver'),
+      supabase.from(TABLES.USERS).select('*', { count: 'exact', head: true }).in('role', ['ngo', 'ngo_pending', 'ngo_rejected']),
+      supabase.from(TABLES.USERS).select('*', { count: 'exact', head: true }).eq('role', 'ngo'),
+      supabase.from(TABLES.USERS).select('*', { count: 'exact', head: true }).eq('role', 'ngo_pending'),
+      supabase.from(TABLES.USERS).select('*', { count: 'exact', head: true }).eq('role', 'ngo_rejected'),
       // Pending help requests
       supabase.from(TABLES.HELP_REQUESTS).select('*', { count: 'exact', head: true }).eq('status', 'pending'),
       supabase.from(TABLES.SOS_ALERTS).select('*', { count: 'exact', head: true }).eq('status', 'active'),
-      supabase.from(TABLES.HELP_REQUESTS).select('*', { count: 'exact', head: true }).eq('status', 'completed')
+      supabase.from(TABLES.HELP_REQUESTS).select('*', { count: 'exact', head: true }).eq('status', 'completed'),
+      // Best-effort resolved breakdown (depends on schema having volunteer_id)
+      supabase.from(TABLES.HELP_REQUESTS).select('*', { count: 'exact', head: true }).eq('status', 'completed').is('volunteer_id', null),
+      supabase.from(TABLES.HELP_REQUESTS).select('*', { count: 'exact', head: true }).eq('status', 'completed').not('volunteer_id', 'is', null),
     ]);
 
     // Log any errors but continue
@@ -2490,17 +3351,34 @@ app.get('/admin/stats', ensureAdmin, async (req, res) => {
 
     const totalSeniors = results[0].count || 0;
     const activeCaregivers = results[1].count || 0;
-    const pendingRequests = results[2].count || 0;
-    const sosAlerts = results[3].count || 0;
-    const helpResolved = results[4].count || 0;
+    const totalNgos = results[2].count || 0;
+    const approvedNgos = results[3].count || 0;
+    const pendingNgos = results[4].count || 0;
+    const rejectedNgos = results[5].count || 0;
+    const pendingRequests = results[6].count || 0;
+    const sosAlerts = results[7].count || 0;
+    const helpResolved = results[8].count || 0;
+
+    let ngoHelpResolved = results[9].count || 0;
+    let volunteerHelpResolved = results[10].count || 0;
+    if (results[9].error || results[10].error) {
+      ngoHelpResolved = 0;
+      volunteerHelpResolved = 0;
+    }
 
     res.json({
       stats: {
         totalSeniors,
         activeCaregivers,
+        totalNgos,
+        approvedNgos,
+        pendingNgos,
+        rejectedNgos,
         pendingRequests,
         sosAlerts,
         helpResolved,
+        ngoHelpResolved,
+        volunteerHelpResolved,
         avgResponseTime: '12 min' // Placeholder
       }
     });
@@ -2641,6 +3519,26 @@ app.get('/admin/analytics', ensureAdmin, async (req, res) => {
     const avgMs = responseSamples.length ? Math.round(responseSamples.reduce((a, b) => a + b, 0) / responseSamples.length) : 0;
     const avgMin = avgMs ? Math.max(1, Math.round(avgMs / 60000)) : 0;
 
+    const completed = (requests || []).filter((r) => String(r.status || '').toLowerCase() === 'completed');
+    const volunteerCompleted = completed.filter((r) => !!r.volunteer_id).length;
+    const ngoCompleted = completed.filter((r) => !r.volunteer_id).length;
+
+    let ngoCounts = { total: 0, approved: 0, pending: 0, rejected: 0 };
+    try {
+      const countResults = await Promise.all([
+        supabase.from(TABLES.USERS).select('*', { count: 'exact', head: true }).in('role', ['ngo', 'ngo_pending', 'ngo_rejected']),
+        supabase.from(TABLES.USERS).select('*', { count: 'exact', head: true }).eq('role', 'ngo'),
+        supabase.from(TABLES.USERS).select('*', { count: 'exact', head: true }).eq('role', 'ngo_pending'),
+        supabase.from(TABLES.USERS).select('*', { count: 'exact', head: true }).eq('role', 'ngo_rejected'),
+      ]);
+      ngoCounts = {
+        total: countResults[0].count || 0,
+        approved: countResults[1].count || 0,
+        pending: countResults[2].count || 0,
+        rejected: countResults[3].count || 0,
+      };
+    } catch {}
+
     const weeklyData = Array.from(byDay.entries())
       .sort((a, b) => (a[0] < b[0] ? -1 : 1))
       .slice(-7)
@@ -2650,6 +3548,8 @@ app.get('/admin/analytics', ensureAdmin, async (req, res) => {
       metrics: {
         helpRequests: { total, breakdown },
         responseTime: { averageMinutes: avgMin },
+        resolution: { completed: completed.length, volunteerCompleted, ngoCompleted },
+        ngos: ngoCounts,
       },
       trend: weeklyData,
     });
@@ -2854,7 +3754,7 @@ app.get('/admin/ngos', ensureAdmin, async (req, res) => {
     const { data, error } = await supabase
       .from(TABLES.USERS)
       .select('*')
-      .eq('role', 'ngo')
+      .in('role', ['ngo', 'ngo_pending', 'ngo_rejected'])
       .order('updated_at', { ascending: false })
       .limit(lim);
     if (error) throw error;
@@ -2862,6 +3762,12 @@ app.get('/admin/ngos', ensureAdmin, async (req, res) => {
     let ngos = (data || []).map(parseProfileData).map((u) => {
       const isBlocked = u.is_blocked === true || u.blocked === true;
       const isVerified = u.is_verified === true || u.verified === true;
+      const normalizedRole = String(u.role || '').toLowerCase();
+      const applicationStatus = normalizedRole === 'ngo_pending'
+        ? 'pending'
+        : (normalizedRole === 'ngo_rejected' || u.ngo_rejected === true)
+          ? 'rejected'
+          : 'approved';
       return {
         id: u.id,
         name: u.name || u.full_name || 'NGO',
@@ -2869,14 +3775,24 @@ app.get('/admin/ngos', ensureAdmin, async (req, res) => {
         phone: u.phone,
         status: isBlocked ? 'disabled' : 'enabled',
         verified: isVerified,
+        applicationStatus,
         regions: u.ngo_regions || u.regions || [],
         serviceTypes: u.ngo_service_types || u.service_types || [],
+        registrationNumber: u.registration_number || u.registrationNumber,
+        contactPerson: u.contact_person || u.contactPerson,
+        areasOfOperation: u.areas_of_operation || u.areasOfOperation,
+        servicesOffered: u.services_offered || u.servicesOffered,
+        verificationDocuments: u.verification_documents || u.verificationDocuments,
         raw: u,
       };
     });
 
     if (statusNorm !== 'all') {
-      ngos = ngos.filter((n) => n.status === statusNorm);
+      if (statusNorm === 'pending' || statusNorm === 'approved' || statusNorm === 'rejected') {
+        ngos = ngos.filter((n) => n.applicationStatus === statusNorm);
+      } else {
+        ngos = ngos.filter((n) => n.status === statusNorm);
+      }
     }
     if (verifiedNorm !== 'all') {
       const want = verifiedNorm === 'true' || verifiedNorm === 'yes' || verifiedNorm === 'verified';
@@ -2910,12 +3826,114 @@ app.post('/admin/ngos/:id/verify', ensureAdmin, async (req, res) => {
   }
 });
 
+app.post('/admin/ngos/:id/approve', ensureAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const now = new Date().toISOString();
+
+    try {
+      const { error } = await supabase
+        .from(TABLES.USERS)
+        .update({ role: 'ngo', updated_at: now })
+        .eq('id', id);
+      if (error) throw error;
+    } catch (e) {
+      console.warn(`[WARN] Failed to update role=ngo for ${id}:`, e?.message || e);
+    }
+
+    const updated = await writeUserMetadata(id, {
+      is_approved: true,
+      is_verified: true,
+      verified: true,
+      verified_at: now,
+      ngo_rejected: false,
+      ngo_rejected_reason: null,
+      ngo_rejected_at: null,
+    });
+
+    try {
+      await supabase
+        .from(TABLES.NGOS)
+        .upsert({ user_id: id, status: 'approved', updated_at: now }, { onConflict: 'user_id' });
+    } catch (e) {
+      console.warn(`[WARN] Failed to update ngos status (approved) for ${id}:`, e?.message || e);
+    }
+
+    // Persist decision in pending_approvals
+    try {
+      const upd = await supabase
+        .from(TABLES.PENDING_APPROVALS)
+        .update({ status: 'approved', decided_at: now })
+        .eq('uid', id)
+        .select();
+
+      if (upd?.error || !Array.isArray(upd?.data) || upd.data.length === 0) {
+        await supabase
+          .from(TABLES.PENDING_APPROVALS)
+          .insert({ uid: id, status: 'approved', decided_at: now, created_at: now });
+      }
+    } catch (e) {
+      console.warn(`[WARN] Failed to persist pending_approvals (approved) for ${id}:`, e?.message || e);
+    }
+
+    emitAdminUpdate({ type: 'ngo', action: 'approved', ngo: updated });
+    res.json({ ngo: updated });
+  } catch (e) {
+    console.error('[ERROR] Failed to approve NGO:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.post('/admin/ngos/:id/reject', ensureAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     const { reason = '' } = req.body || {};
     const now = new Date().toISOString();
-    const updated = await writeUserMetadata(id, { is_verified: false, verified: false, ngo_rejected: true, ngo_rejected_reason: String(reason || ''), ngo_rejected_at: now });
+
+    try {
+      const { error } = await supabase
+        .from(TABLES.USERS)
+        .update({ role: 'ngo_rejected', updated_at: now })
+        .eq('id', id);
+      if (error) throw error;
+    } catch (e) {
+      console.warn(`[WARN] Failed to update role=ngo_rejected for ${id}:`, e?.message || e);
+    }
+
+    const updated = await writeUserMetadata(id, {
+      is_approved: false,
+      is_verified: false,
+      verified: false,
+      ngo_rejected: true,
+      ngo_rejected_reason: String(reason || ''),
+      ngo_rejected_at: now,
+    });
+
+    try {
+      await supabase
+        .from(TABLES.NGOS)
+        .upsert({ user_id: id, status: 'rejected', updated_at: now }, { onConflict: 'user_id' });
+    } catch (e) {
+      console.warn(`[WARN] Failed to update ngos status (rejected) for ${id}:`, e?.message || e);
+    }
+
+    // Persist decision in pending_approvals
+    try {
+      const upd = await supabase
+        .from(TABLES.PENDING_APPROVALS)
+        .update({ status: 'rejected', decided_at: now })
+        .eq('uid', id)
+        .select();
+
+      if (upd?.error || !Array.isArray(upd?.data) || upd.data.length === 0) {
+        await supabase
+          .from(TABLES.PENDING_APPROVALS)
+          .insert({ uid: id, status: 'rejected', decided_at: now, created_at: now });
+      }
+    } catch (e) {
+      console.warn(`[WARN] Failed to persist pending_approvals (rejected) for ${id}:`, e?.message || e);
+    }
+
     emitAdminUpdate({ type: 'ngo', action: 'rejected', ngo: updated });
     res.json({ ngo: updated });
   } catch (e) {

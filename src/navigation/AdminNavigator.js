@@ -8,6 +8,7 @@ import {
   IncidentManagementScreen,
   AnalyticsScreen,
   VolunteerApprovalScreen,
+  NGOApprovalScreen,
   UserManagementScreen,
   AdminProfileScreen,
   AdminNotificationsScreen,
@@ -29,6 +30,7 @@ const AdminNavigator = () => {
       <Stack.Screen name="IncidentManagement" component={IncidentManagementScreen} />
       <Stack.Screen name="Analytics" component={AnalyticsScreen} />
       <Stack.Screen name="VolunteerApproval" component={VolunteerApprovalScreen} />
+      <Stack.Screen name="NGOApproval" component={NGOApprovalScreen} />
       <Stack.Screen name="UserManagement" component={UserManagementScreen} />
       <Stack.Screen name="AdminProfile" component={AdminProfileScreen} />
       <Stack.Screen name="Notifications" component={AdminNotificationsScreen} />

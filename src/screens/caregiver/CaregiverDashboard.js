@@ -20,6 +20,8 @@ import useIncomingCallListener from '../../hooks/useIncomingCallListener';
 import { useFocusEffect } from '@react-navigation/native';
 import { getSocket, identify } from '../../services/socketService';
 
+const REQUESTS_CACHE_KEY = 'caregiver_dashboard_requests_cache_v1';
+
 // Dummy/fallback requests data
 const DUMMY_REQUESTS = [
   {
@@ -110,6 +112,7 @@ const CaregiverDashboard = ({ navigation }) => {
   useIncomingCallListener();
 
   useEffect(() => {
+    hydrateRequestsFromCache();
     loadDashboardData();
   }, []);
 
@@ -119,9 +122,49 @@ const CaregiverDashboard = ({ navigation }) => {
     }, [])
   );
 
-  const loadDashboardData = async () => {
+  const hydrateRequestsFromCache = async () => {
     try {
-      setLoading(true);
+      const cached = await AsyncStorage.getItem(REQUESTS_CACHE_KEY);
+      if (!cached) return;
+      const parsed = JSON.parse(cached);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        setAllRequests(parsed);
+      }
+    } catch {
+      // ignore
+    }
+  };
+
+  const mergeRequestsPreservingHistory = ({ prev = [], fresh = [] }) => {
+    const prevList = Array.isArray(prev) ? prev : [];
+    const freshList = Array.isArray(fresh) ? fresh : [];
+
+    const freshById = new Map(freshList.map((r) => [String(r?.id), r]));
+    const merged = [...freshList];
+
+    // Preserve completed items that might be missing from the fresh fetch
+    prevList.forEach((r) => {
+      const id = String(r?.id);
+      if (!id) return;
+      if (freshById.has(id)) return;
+      if (r?.status === 'completed') merged.push(r);
+    });
+
+    return merged;
+  };
+
+  const persistRequestsCache = async (requests) => {
+    try {
+      if (!Array.isArray(requests)) return;
+      await AsyncStorage.setItem(REQUESTS_CACHE_KEY, JSON.stringify(requests));
+    } catch {
+      // ignore
+    }
+  };
+
+  const loadDashboardData = async ({ showLoading = true } = {}) => {
+    try {
+      if (showLoading) setLoading(true);
       const token = await AsyncStorage.getItem('userToken');
       
       // Load fresh profile from backend
@@ -163,7 +206,7 @@ const CaregiverDashboard = ({ navigation }) => {
     } catch (error) {
       console.error('Error loading dashboard:', error);
     } finally {
-      setLoading(false);
+      if (showLoading) setLoading(false);
     }
   };
 
@@ -232,15 +275,19 @@ const CaregiverDashboard = ({ navigation }) => {
         return r;
       });
 
-      // Combine with dummy only if empty for demo purposes
-      if (realRequests.length === 0) {
-        setAllRequests(dummyRequests);
-      } else {
-        setAllRequests(realRequests);
-      }
+      const nextFresh = realRequests.length === 0 ? dummyRequests : realRequests;
+      setAllRequests((prev) => {
+        const merged = mergeRequestsPreservingHistory({ prev, fresh: nextFresh });
+        persistRequestsCache(merged);
+        return merged;
+      });
     } catch (error) {
       console.error('Error loading requests:', error);
-      setAllRequests(DUMMY_REQUESTS);
+      setAllRequests((prev) => {
+        const fallback = Array.isArray(prev) && prev.length > 0 ? prev : DUMMY_REQUESTS;
+        persistRequestsCache(fallback);
+        return fallback;
+      });
     }
   };
 
@@ -294,7 +341,7 @@ const CaregiverDashboard = ({ navigation }) => {
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await loadDashboardData();
+    await loadDashboardData({ showLoading: false });
     setRefreshing(false);
   };
 
@@ -356,18 +403,34 @@ const CaregiverDashboard = ({ navigation }) => {
     try {
       const token = await AsyncStorage.getItem('userToken');
       
-      if (!requestId.toString().startsWith('dummy')) {
+      const isDummy = requestId.toString().startsWith('dummy');
+
+      if (!isDummy) {
         const resp = await fetch(`${API_BASE}/help-requests/${requestId}/complete`, {
           method: 'PUT',
           headers: { 'Authorization': `Bearer ${token}` }
         });
         if (!resp.ok) throw new Error('Failed to complete request');
+      } else {
+        // Persist dummy completions so refresh doesn't erase History in demo mode
+        try {
+          const resolvedDummyJson = await AsyncStorage.getItem('dummyResolvedIds');
+          const resolvedDummyIds = resolvedDummyJson ? JSON.parse(resolvedDummyJson) : [];
+          const next = Array.isArray(resolvedDummyIds) ? resolvedDummyIds.slice() : [];
+          const idStr = String(requestId);
+          if (!next.includes(idStr)) next.push(idStr);
+          await AsyncStorage.setItem('dummyResolvedIds', JSON.stringify(next));
+        } catch {
+          // ignore
+        }
       }
       
       // Update local state
-      setAllRequests(prev => 
-        prev.map(r => r.id === requestId ? { ...r, status: 'completed', completedAt: 'Just now' } : r)
-      );
+      setAllRequests((prev) => {
+        const updated = prev.map((r) => (r.id === requestId ? { ...r, status: 'completed', completedAt: 'Just now' } : r));
+        persistRequestsCache(updated);
+        return updated;
+      });
       
       Alert.alert('Success', 'Request marked as completed!');
     } catch (error) {

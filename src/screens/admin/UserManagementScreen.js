@@ -215,6 +215,37 @@ const UserManagementScreen = ({ navigation }) => {
     }
   };
 
+  const ngoProfileUpdateApprove = async (n) => {
+    Alert.alert('Approve Update', `Approve profile update for ${n.name}?`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Approve',
+        style: 'default',
+        onPress: async () => {
+          try {
+            await fetchJson(`${API_BASE}/admin/ngos/${n.id}/profile-update/approve`, { method: 'POST' });
+            await load();
+          } catch (e) {
+            Alert.alert('Error', e.message || 'Failed');
+          }
+        },
+      },
+    ]);
+  };
+
+  const ngoProfileUpdateReject = (n) => {
+    setModal({
+      open: true,
+      type: 'ngo_profile_update_reject',
+      target: n,
+      title: 'Reject Profile Update',
+      aLabel: 'Reason',
+      a: '',
+      bLabel: '',
+      b: '',
+    });
+  };
+
   const ngoAccess = async (n) => {
     try {
       await fetchJson(`${API_BASE}/admin/ngos/${n.id}/access`, {
@@ -280,6 +311,15 @@ const UserManagementScreen = ({ navigation }) => {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ reason: String(modal.a || '') }),
+        });
+      }
+      if (type === 'ngo_profile_update_reject') {
+        const reason = String(modal.a || '').trim();
+        if (!reason) throw new Error('Reason required');
+        await fetchJson(`${API_BASE}/admin/ngos/${target.id}/profile-update/reject`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ reason }),
         });
       }
       if (type === 'senior_flag') {
@@ -372,6 +412,25 @@ const UserManagementScreen = ({ navigation }) => {
               <View style={styles.smallRow}>
                 <Text style={styles.smallText}>Regions: {Array.isArray(item.regions) && item.regions.length ? item.regions.join(', ') : '—'}</Text>
                 <Text style={styles.smallText}>Services: {Array.isArray(item.serviceTypes) && item.serviceTypes.length ? item.serviceTypes.join(', ') : '—'}</Text>
+                {String(item?.raw?.ngo_profile_update_status || '').toLowerCase() === 'pending' && (
+                  <View style={styles.updateBox}>
+                    <View style={styles.updateRow}>
+                      <MaterialCommunityIcons name="clock-outline" size={18} color={colors.accent.orange} />
+                      <Text style={styles.updateTitle}>Profile update requested</Text>
+                    </View>
+                    <Text style={styles.updateText}>
+                      {(() => {
+                        const patch = item?.raw?.ngo_profile_update_request;
+                        if (!patch || typeof patch !== 'object') return '—';
+                        const parts = [];
+                        if (patch.contactPerson !== undefined) parts.push(`Contact: ${patch.contactPerson || '—'}`);
+                        if (patch.phone !== undefined) parts.push(`Phone: ${patch.phone || '—'}`);
+                        if (patch.email !== undefined) parts.push(`Email: ${patch.email || '—'}`);
+                        return parts.length ? parts.join(' • ') : '—';
+                      })()}
+                    </Text>
+                  </View>
+                )}
               </View>
             )}
 
@@ -410,6 +469,16 @@ const UserManagementScreen = ({ navigation }) => {
                   <TouchableOpacity style={styles.actionBtn} onPress={() => ngoAccess(item)}>
                     <Text style={styles.actionText}>{item.status === 'enabled' ? 'Disable' : 'Enable'}</Text>
                   </TouchableOpacity>
+                  {String(item?.raw?.ngo_profile_update_status || '').toLowerCase() === 'pending' && (
+                    <>
+                      <TouchableOpacity style={styles.actionBtn} onPress={() => ngoProfileUpdateApprove(item)}>
+                        <Text style={styles.actionText}>Approve Update</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity style={[styles.actionBtn, styles.actionBtnDanger]} onPress={() => ngoProfileUpdateReject(item)}>
+                        <Text style={[styles.actionText, { color: colors.status.error }]}>Reject Update</Text>
+                      </TouchableOpacity>
+                    </>
+                  )}
                   <TouchableOpacity
                     style={styles.actionBtn}
                     onPress={() => setModal({
@@ -567,7 +636,17 @@ const styles = StyleSheet.create({
   smallText: { fontSize: typography.sizes.sm, color: colors.neutral.darkGray },
   actions: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.md },
   actionBtn: { paddingVertical: spacing.xs, paddingHorizontal: spacing.sm, borderRadius: borderRadius.md, backgroundColor: colors.neutral.lightGray },
+  actionBtnDanger: { backgroundColor: '#FFEBEE', borderWidth: 1, borderColor: colors.status.error },
   actionText: { fontSize: typography.sizes.sm, color: colors.neutral.black, fontWeight: typography.weights.medium },
+  updateBox: {
+    marginTop: spacing.sm,
+    padding: spacing.sm,
+    borderRadius: borderRadius.md,
+    backgroundColor: colors.accent.orange + '15',
+  },
+  updateRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  updateTitle: { fontSize: typography.sizes.sm, fontWeight: typography.weights.semiBold, color: colors.neutral.black },
+  updateText: { marginTop: spacing.xs, fontSize: typography.sizes.sm, color: colors.neutral.darkGray },
   emptyState: { padding: spacing.lg, alignItems: 'center' },
   emptyTitle: { fontSize: typography.sizes.md, fontWeight: typography.weights.semiBold, color: colors.neutral.black },
   emptySubtitle: { marginTop: spacing.xs, fontSize: typography.sizes.sm, color: colors.neutral.darkGray, textAlign: 'center' },

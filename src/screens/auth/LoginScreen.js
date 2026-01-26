@@ -126,6 +126,10 @@ const LoginScreen = ({ navigation }) => {
           navigation.reset({ index: 0, routes: [{ name: 'CaregiverApp' }] });
         } else if (role === 'volunteer_pending') {
           navigation.reset({ index: 0, routes: [{ name: 'VolunteerPending' }] });
+        } else if (role === 'ngo') {
+          navigation.reset({ index: 0, routes: [{ name: 'NGOApp' }] });
+        } else if (role === 'ngo_pending') {
+          navigation.reset({ index: 0, routes: [{ name: 'NGOPending' }] });
         } else if (role === 'elderly') {
           navigation.reset({ index: 0, routes: [{ name: 'ElderlyApp' }] });
         } else {
@@ -162,6 +166,8 @@ const LoginScreen = ({ navigation }) => {
         navigation.reset({ index: 0, routes: [{ name: 'AdminApp' }] });
       } else if (role === 'volunteer') {
         navigation.reset({ index: 0, routes: [{ name: 'CaregiverApp' }] });
+      } else if (role === 'ngo') {
+        navigation.reset({ index: 0, routes: [{ name: 'NGOApp' }] });
       } else if (role === 'elderly') {
         navigation.reset({ index: 0, routes: [{ name: 'ElderlyApp' }] });
       }
@@ -324,6 +330,15 @@ const LoginScreen = ({ navigation }) => {
                 >
                   <MaterialCommunityIcons name="shield-account" size={24} color={colors.neutral.white} />
                   <Text style={styles.demoButtonText}>Admin</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.demoButton, { backgroundColor: '#1565C0' }]}
+                  onPress={() => handleDemoLogin('ngo')}
+                  disabled={loading}
+                >
+                  <MaterialCommunityIcons name="office-building" size={24} color={colors.neutral.white} />
+                  <Text style={styles.demoButtonText}>NGO</Text>
                 </TouchableOpacity>
               </View>
             </View>

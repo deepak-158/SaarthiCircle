@@ -10,6 +10,7 @@ import {
   LoginScreen,
   RegisterScreen,
   VolunteerPendingScreen,
+  NGOPendingScreen,
 } from '../screens/auth';
 
 const Stack = createNativeStackNavigator();
@@ -31,6 +32,7 @@ const AuthNavigator = ({ route }) => {
       <Stack.Screen name="Onboarding2" component={OnboardingStep2} />
       <Stack.Screen name="Onboarding3" component={OnboardingStep3} />
       <Stack.Screen name="VolunteerPending" component={VolunteerPendingScreen} />
+      <Stack.Screen name="NGOPending" component={NGOPendingScreen} />
     </Stack.Navigator>
   );
 };

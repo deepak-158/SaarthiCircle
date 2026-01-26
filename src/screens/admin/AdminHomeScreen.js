@@ -386,6 +386,21 @@ const AdminHomeScreen = ({ navigation }) => {
             <Text style={styles.actionTitle}>Volunteer Approval</Text>
             <Text style={styles.actionSubtitle}>Review applications</Text>
           </TouchableOpacity>
+
+          <TouchableOpacity 
+            style={[styles.actionCard, shadows.sm]}
+            onPress={() => navigation.navigate('NGOApproval')}
+          >
+            <View style={[styles.actionIcon, { backgroundColor: '#F3E5F5' }]}>
+              <MaterialCommunityIcons
+                name="office-building-check"
+                size={28}
+                color="#6A1B9A"
+              />
+            </View>
+            <Text style={styles.actionTitle}>NGO Approval</Text>
+            <Text style={styles.actionSubtitle}>Review NGO applications</Text>
+          </TouchableOpacity>
         </View>
 
         {/* Recent Activity */}

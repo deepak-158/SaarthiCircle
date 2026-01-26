@@ -66,6 +66,10 @@ const SplashScreen = ({ navigation }) => {
               navigation.replace('ElderlyApp');
             } else if (userRole === 'volunteer_pending') {
               navigation.replace('Auth', { screen: 'VolunteerPending' });
+            } else if (userRole === 'ngo_pending') {
+              navigation.replace('Auth', { screen: 'NGOPending' });
+            } else if (userRole === 'ngo') {
+              navigation.replace('NGOApp');
             } else {
               navigation.replace('Auth', { screen: 'Login' });
             }

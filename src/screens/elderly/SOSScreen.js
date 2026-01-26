@@ -19,6 +19,7 @@ import { LargeButton } from '../../components/common';
 import { colors, typography, spacing, borderRadius, shadows } from '../../theme';
 import { getTranslation } from '../../i18n/translations';
 import { createSOSAlert } from '../../config/firebase';
+import { BACKEND_URL as API_BASE } from '../../config/backend';
 
 const SOSScreen = ({ navigation }) => {
   const [language] = useState('en');
@@ -89,6 +90,20 @@ const SOSScreen = ({ navigation }) => {
       console.log('SOS Alert sent to Firebase');
     } catch (error) {
       console.error('Error sending SOS to Firebase:', error);
+    }
+
+    // Best-effort: also persist to backend Supabase so NGOs can see emergencies
+    try {
+      const token = await AsyncStorage.getItem('userToken');
+      if (token) {
+        await fetch(`${API_BASE}/sos-alerts`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: 'Emergency SOS triggered', type: 'panic' }),
+        });
+      }
+    } catch {
+      // ignore
     }
   };
 

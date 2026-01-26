@@ -30,7 +30,7 @@ const AnalyticsScreen = ({ navigation }) => {
     helpRequests: { total: 0, change: 0, breakdown: {} },
     responseTime: { average: '—', change: 0 },
     satisfaction: { score: 0, change: 0 },
-    activeUsers: { seniors: 0, caregivers: 0, changeS: 0, changeC: 0 },
+    activeUsers: { seniors: 0, caregivers: 0, ngos: 0, changeS: 0, changeC: 0, changeN: 0 },
   });
 
   const [topCaregivers, setTopCaregivers] = useState([]);
@@ -135,12 +135,13 @@ const AnalyticsScreen = ({ navigation }) => {
 
       const seniors = statsJson?.stats?.totalSeniors ?? 0;
       const caregivers = statsJson?.stats?.activeCaregivers ?? 0;
+      const ngos = statsJson?.stats?.approvedNgos ?? statsJson?.stats?.totalNgos ?? 0;
 
       setMetrics({
         helpRequests: { total, change: 0, breakdown },
         responseTime: { average: avgMinutes ? `${avgMinutes} min` : '—', change: 0 },
         satisfaction: { score: 0, change: 0 },
-        activeUsers: { seniors, caregivers, changeS: 0, changeC: 0 },
+        activeUsers: { seniors, caregivers, ngos, changeS: 0, changeC: 0, changeN: 0 },
       });
     } catch (e) {
       // ignore
@@ -383,6 +384,19 @@ const AnalyticsScreen = ({ navigation }) => {
               <Text style={styles.userStatValue}>{metrics.activeUsers.caregivers}</Text>
               <Text style={styles.userStatLabel}>Caregivers</Text>
               <Text style={styles.userStatChange}>+{metrics.activeUsers.changeC} this week</Text>
+            </View>
+
+            <View style={styles.userStatDivider} />
+
+            <View style={styles.userStatItem}>
+              <MaterialCommunityIcons
+                name="office-building"
+                size={32}
+                color={colors.accent.orange}
+              />
+              <Text style={styles.userStatValue}>{metrics.activeUsers.ngos}</Text>
+              <Text style={styles.userStatLabel}>NGOs</Text>
+              <Text style={styles.userStatChange}>+{metrics.activeUsers.changeN} this week</Text>
             </View>
           </View>
         </View>

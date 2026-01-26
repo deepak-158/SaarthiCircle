@@ -4,7 +4,7 @@ import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import { AuthNavigator, ElderlyNavigator, CaregiverNavigator, AdminNavigator } from './src/navigation';
+import { AuthNavigator, ElderlyNavigator, CaregiverNavigator, AdminNavigator, NGONavigator } from './src/navigation';
 import { SplashScreen } from './src/screens/auth';
 import { subscribeToAuthChanges, checkAuth, logout } from './src/services/authService';
 import { ChatProvider } from './src/context/ChatContext';
@@ -95,6 +95,7 @@ const App = () => {
             <RootStack.Screen name="AdminApp" component={AdminNavigator} />
             <RootStack.Screen name="CaregiverApp" component={CaregiverNavigator} />
             <RootStack.Screen name="ElderlyApp" component={ElderlyNavigator} />
+            <RootStack.Screen name="NGOApp" component={NGONavigator} />
           </RootStack.Navigator>
         </NavigationContainer>
       </View>
