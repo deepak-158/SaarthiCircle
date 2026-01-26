@@ -1,5 +1,5 @@
 // AI Risk Dashboard Screen - Wellness Insights & Risk Analysis
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { 
   View, 
   Text, 
@@ -8,55 +8,124 @@ import {
   ScrollView,
   TouchableOpacity,
   Dimensions,
+  ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { colors, typography, spacing, borderRadius, shadows } from '../../theme';
+import { BACKEND_URL as API_BASE } from '../../config/backend';
+import { logout } from '../../services/authService';
+import { getSocket, identify } from '../../services/socketService';
 
 const { width } = Dimensions.get('window');
 
 const AIRiskDashboardScreen = ({ navigation }) => {
-  const [riskCategories] = useState({
-    high: 12,
-    medium: 45,
-    low: 190,
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState(null);
+
+  const [riskCategories, setRiskCategories] = useState({
+    high: 0,
+    medium: 0,
+    low: 0,
   });
 
-  const [riskAlerts] = useState([
-    {
-      id: '1',
-      seniorName: 'Sharma Ji',
-      riskLevel: 'high',
-      reasons: ['Missed 3 check-ins', 'Low mood trend', 'Isolation pattern'],
-      lastContact: '48 hours ago',
-    },
-    {
-      id: '2',
-      seniorName: 'Gupta Aunty',
-      riskLevel: 'high',
-      reasons: ['Negative sentiment in calls', 'Declining activity'],
-      lastContact: '24 hours ago',
-    },
-    {
-      id: '3',
-      seniorName: 'Patel Uncle',
-      riskLevel: 'medium',
-      reasons: ['Irregular sleep pattern', 'Missed medication reminder'],
-      lastContact: '12 hours ago',
-    },
-    {
-      id: '4',
-      seniorName: 'Verma Ji',
-      riskLevel: 'medium',
-      reasons: ['Social isolation', 'Reduced app engagement'],
-      lastContact: '6 hours ago',
-    },
-  ]);
+  const [riskAlerts, setRiskAlerts] = useState([]);
 
-  const [moodTrends] = useState({
-    happy: 45,
-    okay: 38,
-    sad: 17,
+  const [moodTrends, setMoodTrends] = useState({
+    happy: 0,
+    okay: 0,
+    sad: 0,
   });
+
+  useEffect(() => {
+    loadRiskData();
+
+    const initRealtime = async () => {
+      try {
+        const profileJson = await AsyncStorage.getItem('userProfile');
+        const profile = profileJson ? JSON.parse(profileJson) : null;
+        const userId = profile?.id || profile?.uid || profile?.userId;
+        if (userId) {
+          identify({ userId, role: 'ADMIN' });
+        }
+
+        const socket = getSocket();
+        const onUpdate = () => {
+          loadRiskData();
+        };
+        socket.off('admin:update');
+        socket.on('admin:update', onUpdate);
+      } catch (e) {
+        // ignore
+      }
+    };
+
+    initRealtime();
+
+    return () => {
+      try {
+        const socket = getSocket();
+        socket.off('admin:update');
+      } catch (e) {
+        // ignore
+      }
+    };
+  }, []);
+
+  const formatTimeAgo = (date) => {
+    if (!date) return '—';
+    const now = new Date();
+    const diff = now - date;
+    const minutes = Math.floor(diff / (1000 * 60));
+    const hours = Math.floor(diff / (1000 * 60 * 60));
+    const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+
+    if (minutes < 1) return 'Just now';
+    if (minutes < 60) return `${minutes} mins ago`;
+    if (hours < 24) return `${hours} hours ago`;
+    return `${days} days ago`;
+  };
+
+  const loadRiskData = async () => {
+    try {
+      setLoading(true);
+      const token = await AsyncStorage.getItem('userToken');
+      if (!token) {
+        navigation.replace('Login');
+        return;
+      }
+
+      const resp = await fetch(`${API_BASE}/admin/risk`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+
+      if (resp.status === 401) {
+        await logout();
+        navigation.replace('Login');
+        return;
+      }
+
+      if (!resp.ok) throw new Error('Failed to load risk data');
+      const data = await resp.json();
+
+      if (data?.riskCategories) setRiskCategories(data.riskCategories);
+      if (Array.isArray(data?.riskAlerts)) setRiskAlerts(data.riskAlerts);
+      if (data?.moodTrends) setMoodTrends(data.moodTrends);
+      setLastUpdatedAt(new Date());
+    } catch (e) {
+      // ignore
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await loadRiskData();
+  };
 
   const getRiskColor = (level) => {
     switch (level) {
@@ -103,7 +172,19 @@ const AIRiskDashboardScreen = ({ navigation }) => {
       <ScrollView 
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={[colors.primary.main]}
+          />
+        }
       >
+        {loading && (
+          <View style={{ paddingVertical: spacing.md }}>
+            <ActivityIndicator size="small" color={colors.primary.main} />
+          </View>
+        )}
         {/* AI Analysis Card */}
         <View style={[styles.aiCard, shadows.md]}>
           <View style={styles.aiHeader}>
@@ -114,7 +195,7 @@ const AIRiskDashboardScreen = ({ navigation }) => {
             />
             <View style={styles.aiInfo}>
               <Text style={styles.aiTitle}>AI Wellness Analysis</Text>
-              <Text style={styles.aiSubtitle}>Last updated: 5 mins ago</Text>
+              <Text style={styles.aiSubtitle}>Last updated: {formatTimeAgo(lastUpdatedAt)}</Text>
             </View>
           </View>
           <Text style={styles.aiDescription}>
@@ -199,7 +280,7 @@ const AIRiskDashboardScreen = ({ navigation }) => {
           <TouchableOpacity 
             key={alert.id}
             style={[styles.alertCard, shadows.sm]}
-            onPress={() => navigation.navigate('SeniorDetail', { seniorId: alert.id })}
+            onPress={() => navigation.navigate('IncidentManagement')}
           >
             <View style={styles.alertHeader}>
               <View style={[

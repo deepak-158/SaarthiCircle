@@ -16,6 +16,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { colors, typography, spacing, borderRadius, shadows } from '../../theme';
 import { BACKEND_URL as API_BASE } from '../../config/backend';
 import { logout } from '../../services/authService';
+import { getSocket, identify } from '../../services/socketService';
 
 const { width } = Dimensions.get('window');
 const cardWidth = (width - spacing.md * 3) / 2;
@@ -49,6 +50,37 @@ const AdminHomeScreen = ({ navigation }) => {
 
   useEffect(() => {
     loadDashboardData();
+
+    const initRealtime = async () => {
+      try {
+        const profileJson = await AsyncStorage.getItem('userProfile');
+        const profile = profileJson ? JSON.parse(profileJson) : null;
+        const userId = profile?.id || profile?.uid || profile?.userId;
+        if (userId) {
+          identify({ userId, role: 'ADMIN' });
+        }
+
+        const socket = getSocket();
+        const onUpdate = () => {
+          loadDashboardData();
+        };
+        socket.off('admin:update');
+        socket.on('admin:update', onUpdate);
+      } catch (e) {
+        // ignore
+      }
+    };
+
+    initRealtime();
+
+    return () => {
+      try {
+        const socket = getSocket();
+        socket.off('admin:update');
+      } catch (e) {
+        // ignore
+      }
+    };
   }, []);
 
   const loadDashboardData = async () => {
@@ -327,7 +359,7 @@ const AdminHomeScreen = ({ navigation }) => {
 
           <TouchableOpacity 
             style={[styles.actionCard, shadows.sm]}
-            onPress={() => navigation.navigate('VolunteerApproval')}
+            onPress={() => navigation.navigate('UserManagement')}
           >
             <View style={[styles.actionIcon, { backgroundColor: '#FFF3E0' }]}>
               <MaterialCommunityIcons

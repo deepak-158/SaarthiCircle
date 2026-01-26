@@ -20,6 +20,7 @@ import { LargeButton } from '../../components/common';
 import { BACKEND_URL as API_BASE } from '../../config/backend';
 import { logout } from '../../services/authService';
 import { createNotification } from '../../config/firebase';
+import { getSocket, identify } from '../../services/socketService';
 
 const VolunteerApprovalScreen = ({ navigation }) => {
   const [pendingVolunteers, setPendingVolunteers] = useState([]);
@@ -38,6 +39,44 @@ const VolunteerApprovalScreen = ({ navigation }) => {
     if (adminToken) {
       loadVolunteers();
     }
+  }, [adminToken]);
+
+  useEffect(() => {
+    if (!adminToken) return;
+    let mounted = true;
+
+    const initRealtime = async () => {
+      try {
+        const profileJson = await AsyncStorage.getItem('userProfile');
+        const profile = profileJson ? JSON.parse(profileJson) : null;
+        const userId = profile?.id || profile?.uid || profile?.userId;
+        if (userId) {
+          identify({ userId, role: 'ADMIN' });
+        }
+
+        const socket = getSocket();
+        const onUpdate = () => {
+          if (!mounted) return;
+          loadVolunteers();
+        };
+        socket.off('admin:update');
+        socket.on('admin:update', onUpdate);
+      } catch (e) {
+        // ignore
+      }
+    };
+
+    initRealtime();
+
+    return () => {
+      mounted = false;
+      try {
+        const socket = getSocket();
+        socket.off('admin:update');
+      } catch (e) {
+        // ignore
+      }
+    };
   }, [adminToken]);
 
   const loadAdminInfo = async () => {

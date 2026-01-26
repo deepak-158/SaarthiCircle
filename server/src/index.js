@@ -25,6 +25,12 @@ const io = new SocketIOServer(server, {
   cors: { origin: '*'}
 });
 
+const emitAdminUpdate = (payload) => {
+  try {
+    io.to('admins').emit('admin:update', { ...payload, ts: new Date().toISOString() });
+  } catch {}
+};
+
 // In-memory presence and session routing
 const onlineVolunteers = new Map(); // volunteerId -> socketId
 const sessions = new Map(); // conversationId -> { seniorId, volunteerId }
@@ -345,6 +351,7 @@ app.put('/help-requests/:id/escalate', ensureAuth, async (req, res) => {
       .single();
 
     if (error) throw error;
+    emitAdminUpdate({ type: 'help_request', action: 'escalated', request: data });
     console.log(`[REQUEST] Help request ${id} escalated by ${req.user.id}. reason=${reason}`);
     res.json({ request: data });
   } catch (e) {
@@ -501,6 +508,10 @@ io.on('connection', (socket) => {
     if (userId) {
       userSockets.set(userId, socket.id);
       console.log(`[SOCKET] ${role} ${userId} identified with socket ${socket.id}`);
+    }
+    if (role === 'ADMIN' || role === 'admin') {
+      socket.join('admins');
+      console.log(`[SOCKET] Admin ${userId} joined admins room`);
     }
     if (role === 'VOLUNTEER') {
       onlineVolunteers.set(userId, socket.id);
@@ -1573,6 +1584,96 @@ app.post('/register/volunteer', ensureAuth, async (req, res) => {
   }
 });
 
+// Register NGO: sets role=ngo_pending
+app.post('/register/ngo', ensureAuth, async (req, res) => {
+  try {
+    const { 
+      ngo_name, 
+      registration_number, 
+      contact_person, 
+      phone, 
+      email, 
+      areas_of_operation, 
+      services_offered,
+      verification_documents
+    } = req.body || {};
+
+    const update = {
+      id: req.user.id,
+      role: 'ngo_pending',
+      name: ngo_name,
+      phone: phone || req.user.phone,
+    };
+
+    const metadata = {
+      is_approved: false,
+      is_ngo: true,
+      ngo_name,
+      registration_number,
+      contact_person,
+      areas_of_operation,
+      services_offered,
+      verification_documents,
+      avatar_emoji: '🏢'
+    };
+    update.avatar_emoji = JSON.stringify(metadata);
+
+    const { data, error } = await supabase
+      .from(TABLES.USERS)
+      .upsert(update, { onConflict: 'id' })
+      .select()
+      .single();
+    if (error) throw error;
+
+    // Save to ngos table
+    try {
+      const ngoProfile = {
+        user_id: req.user.id,
+        ngo_name,
+        registration_number,
+        contact_person,
+        phone: phone || req.user.phone,
+        email: email || req.user.email,
+        areas_of_operation: Array.isArray(areas_of_operation) ? areas_of_operation : [],
+        services_offered: Array.isArray(services_offered) ? services_offered : [],
+        verification_documents: Array.isArray(verification_documents) ? verification_documents : [],
+        status: 'pending',
+        updated_at: new Date().toISOString()
+      };
+      
+      const { error: ngoErr } = await supabase
+        .from(TABLES.NGOS)
+        .upsert(ngoProfile, { onConflict: 'user_id' });
+        
+      if (ngoErr) {
+        console.warn(`[WARN] Failed to save to ngos table:`, ngoErr.message);
+      }
+    } catch (err) {
+      console.warn(`[WARN] Unexpected error saving ngo profile:`, err.message);
+    }
+
+    // Notify admin
+    try {
+      await supabase.from(TABLES.PENDING_APPROVALS).insert({
+        uid: req.user.id,
+        email: req.user.email,
+        full_name: ngo_name,
+        phone: phone || req.user.phone || null,
+        role: 'ngo',
+        status: 'pending',
+        created_at: new Date().toISOString()
+      });
+    } catch (err) {
+      console.warn(`[WARN] Failed to insert into pending_approvals for NGO:`, err.message);
+    }
+
+    res.json({ profile: parseProfileData(data) });
+  } catch (e) {
+    console.error(`[ERROR] NGO registration failed:`, e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.get('/volunteers/available', ensureAuth, async (req, res) => {
   try {
     // Fetch volunteers with role='volunteer' and is_approved=true
@@ -1650,6 +1751,7 @@ app.post('/help-requests', ensureAuth, async (req, res) => {
       .single();
 
     if (error) throw error;
+    emitAdminUpdate({ type: 'help_request', action: 'created', request: data });
     res.status(201).json({ request: data });
   } catch (e) {
     console.error(`[ERROR] Failed to create help request:`, e);
@@ -1805,6 +1907,8 @@ app.put('/help-requests/:id/accept', ensureAuth, async (req, res) => {
       console.error(`[REQUEST] Accept failed:`, updateError);
       return res.status(500).json({ error: 'Failed to accept request' });
     }
+
+    emitAdminUpdate({ type: 'help_request', action: 'accepted', request: updatedRequest });
     
     const { senior_id: seniorId, category: requestType } = updatedRequest;
     
@@ -1992,6 +2096,7 @@ app.put('/help-requests/:id/complete', ensureAuth, async (req, res) => {
       .single();
 
     if (error) throw error;
+    emitAdminUpdate({ type: 'help_request', action: 'completed', request: data });
     res.json({ request: data });
   } catch (e) {
     console.error(`[ERROR] Failed to complete help request:`, e);
@@ -2231,6 +2336,7 @@ app.post('/admin/volunteers/:id/approve', ensureAdmin, async (req, res) => {
 
     // Return the updated volunteer data
     const parsedData = parseProfileData(data);
+    emitAdminUpdate({ type: 'user', action: 'volunteer_approved', user: parsedData });
     console.log(`[ADMIN] Returning parsed data:`, JSON.stringify(parsedData, null, 2));
     console.log(`[ADMIN] ========== APPROVAL SUCCESS ==========`);
     
@@ -2356,6 +2462,7 @@ app.post('/admin/volunteers/:id/reject', ensureAdmin, async (req, res) => {
 
     // Return the updated volunteer data
     const parsedData = parseProfileData(data);
+    emitAdminUpdate({ type: 'user', action: 'volunteer_rejected', user: parsedData });
     console.log(`[ADMIN] Returning parsed data:`, JSON.stringify(parsedData, null, 2));
     res.status(200).json({ volunteer: parsedData, success: true, message: 'Volunteer rejected successfully' });
   } catch (e) {
@@ -2370,12 +2477,10 @@ app.get('/admin/stats', ensureAdmin, async (req, res) => {
     const results = await Promise.all([
       supabase.from(TABLES.USERS).select('*', { count: 'exact', head: true }).or('role.eq.elderly,role.eq.senior'),
       supabase.from(TABLES.USERS).select('*', { count: 'exact', head: true }).or('role.eq.volunteer,role.eq.caregiver'),
-      // Pending volunteers: volunteer_pending OR volunteer with is_approved != true
-      supabase.from(TABLES.USERS)
-        .select('*, avatar_emoji', { count: 'exact' })
-        .in('role', ['volunteer_pending', 'volunteer']),
+      // Pending help requests
+      supabase.from(TABLES.HELP_REQUESTS).select('*', { count: 'exact', head: true }).eq('status', 'pending'),
       supabase.from(TABLES.SOS_ALERTS).select('*', { count: 'exact', head: true }).eq('status', 'active'),
-      supabase.from(TABLES.HELP_REQUESTS).select('*', { count: 'exact', head: true }).eq('status', 'resolved')
+      supabase.from(TABLES.HELP_REQUESTS).select('*', { count: 'exact', head: true }).eq('status', 'completed')
     ]);
 
     // Log any errors but continue
@@ -2385,17 +2490,7 @@ app.get('/admin/stats', ensureAdmin, async (req, res) => {
 
     const totalSeniors = results[0].count || 0;
     const activeCaregivers = results[1].count || 0;
-    // Derive pending volunteers from returned rows (need to parse metadata)
-    let pendingRequests = 0;
-    try {
-      const rows = results[2].data || [];
-      const parsed = rows.map(parseProfileData);
-      pendingRequests = parsed.filter(v => (
-        v.role === 'volunteer_pending' || (v.role === 'volunteer' && v.is_approved !== true)
-      )).length;
-    } catch (e) {
-      pendingRequests = results[2].count || 0;
-    }
+    const pendingRequests = results[2].count || 0;
     const sosAlerts = results[3].count || 0;
     const helpResolved = results[4].count || 0;
 
@@ -2411,6 +2506,667 @@ app.get('/admin/stats', ensureAdmin, async (req, res) => {
     });
   } catch (e) {
     console.error(`[ERROR] Failed to fetch admin stats:`, e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/admin/incidents', ensureAdmin, async (req, res) => {
+  try {
+    const { status = 'all', q = '' } = req.query || {};
+    const qNorm = String(q || '').trim().toLowerCase();
+
+    let helpIncidents = [];
+    try {
+      const { data: help, error } = await supabase
+        .from(TABLES.HELP_REQUESTS)
+        .select('*')
+        .eq('status', 'escalated')
+        .order('created_at', { ascending: false })
+        .limit(200);
+      if (error) throw error;
+      helpIncidents = (help || []).map((r) => ({
+        source: 'help_request',
+        id: r.id,
+        type: 'Escalation',
+        priority: r.priority || 'medium',
+        seniorId: r.senior_id,
+        volunteerId: r.volunteer_id,
+        description: r.description || '',
+        status: 'open',
+        createdAt: r.created_at,
+      }));
+    } catch {}
+
+    let sosIncidents = [];
+    try {
+      const { data: sos, error } = await supabase
+        .from(TABLES.SOS_ALERTS)
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(200);
+      if (error) throw error;
+      sosIncidents = (sos || []).map((s) => {
+        const st = String(s.status || '').toLowerCase();
+        const mappedStatus = st === 'active' ? 'open' : 'resolved';
+        return {
+          source: 'sos_alert',
+          id: s.id,
+          type: 'SOS',
+          priority: 'critical',
+          seniorId: s.senior_id || s.user_id || s.seniorId,
+          description: s.message || s.description || 'SOS alert triggered',
+          status: mappedStatus,
+          createdAt: s.created_at,
+        };
+      });
+    } catch {}
+
+    const combined = [...helpIncidents, ...sosIncidents].sort((a, b) => {
+      const ta = Date.parse(a.createdAt || '') || 0;
+      const tb = Date.parse(b.createdAt || '') || 0;
+      return tb - ta;
+    });
+
+    const uniqueSeniorIds = Array.from(new Set(combined.map((c) => c.seniorId).filter(Boolean)));
+    const seniorsById = new Map();
+    if (uniqueSeniorIds.length > 0) {
+      try {
+        const { data: seniors } = await supabase
+          .from(TABLES.USERS)
+          .select('*')
+          .in('id', uniqueSeniorIds);
+        (seniors || []).forEach((u) => seniorsById.set(u.id, parseProfileData(u)));
+      } catch {}
+    }
+
+    let incidents = combined.map((c) => ({
+      ...c,
+      senior: c.seniorId ? seniorsById.get(c.seniorId) || { id: c.seniorId } : null,
+    }));
+
+    if (status !== 'all') {
+      incidents = incidents.filter((i) => i.status === status);
+    }
+    if (qNorm) {
+      incidents = incidents.filter((i) => {
+        const name = (i?.senior?.name || i?.senior?.full_name || '').toLowerCase();
+        const desc = String(i.description || '').toLowerCase();
+        return name.includes(qNorm) || desc.includes(qNorm) || String(i.id).toLowerCase().includes(qNorm);
+      });
+    }
+
+    res.json({ incidents });
+  } catch (e) {
+    console.error('[ERROR] Failed to fetch admin incidents:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/admin/analytics', ensureAdmin, async (req, res) => {
+  try {
+    const { period = 'week' } = req.query || {};
+    const now = new Date();
+    const days = period === 'today' ? 1 : period === 'month' ? 30 : period === 'year' ? 365 : 7;
+    const start = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
+
+    const { data: requests, error } = await supabase
+      .from(TABLES.HELP_REQUESTS)
+      .select('*')
+      .gte('created_at', start.toISOString())
+      .order('created_at', { ascending: false })
+      .limit(2000);
+    if (error) throw error;
+
+    const total = (requests || []).length;
+    const breakdown = {};
+    const byDay = new Map();
+    let responseSamples = [];
+
+    (requests || []).forEach((r) => {
+      const cat = String(r.category || 'Other');
+      breakdown[cat] = (breakdown[cat] || 0) + 1;
+
+      const d = new Date(r.created_at || Date.now());
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      byDay.set(key, (byDay.get(key) || 0) + 1);
+
+      const acceptedAt = r.accepted_at ? Date.parse(r.accepted_at) : null;
+      const createdAt = r.created_at ? Date.parse(r.created_at) : null;
+      if (acceptedAt && createdAt && acceptedAt >= createdAt) {
+        responseSamples.push(acceptedAt - createdAt);
+      }
+    });
+
+    responseSamples = responseSamples.slice(0, 500);
+    const avgMs = responseSamples.length ? Math.round(responseSamples.reduce((a, b) => a + b, 0) / responseSamples.length) : 0;
+    const avgMin = avgMs ? Math.max(1, Math.round(avgMs / 60000)) : 0;
+
+    const weeklyData = Array.from(byDay.entries())
+      .sort((a, b) => (a[0] < b[0] ? -1 : 1))
+      .slice(-7)
+      .map(([day, count]) => ({ day, requests: count }));
+
+    res.json({
+      metrics: {
+        helpRequests: { total, breakdown },
+        responseTime: { averageMinutes: avgMin },
+      },
+      trend: weeklyData,
+    });
+  } catch (e) {
+    console.error('[ERROR] Failed to fetch admin analytics:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/admin/leaderboard/caregivers', ensureAdmin, async (req, res) => {
+  try {
+    const { period = 'week', limit = 5 } = req.query || {};
+    const now = new Date();
+    const days = period === 'today' ? 1 : period === 'month' ? 30 : period === 'year' ? 365 : 7;
+    const start = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
+    const lim = Math.min(25, Math.max(1, Number(limit) || 5));
+
+    const { data: requests, error } = await supabase
+      .from(TABLES.HELP_REQUESTS)
+      .select('*')
+      .eq('status', 'completed')
+      .gte('created_at', start.toISOString())
+      .order('created_at', { ascending: false })
+      .limit(3000);
+    if (error) throw error;
+
+    const counts = new Map();
+    (requests || []).forEach((r) => {
+      const vid = r.volunteer_id;
+      if (!vid) return;
+      counts.set(vid, (counts.get(vid) || 0) + 1);
+    });
+
+    const ranked = Array.from(counts.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, lim);
+
+    const volunteerIds = ranked.map(([id]) => id);
+    const byId = new Map();
+    if (volunteerIds.length) {
+      try {
+        const { data: users } = await supabase
+          .from(TABLES.USERS)
+          .select('*')
+          .in('id', volunteerIds);
+        (users || []).forEach((u) => byId.set(u.id, parseProfileData(u)));
+      } catch {}
+    }
+
+    const leaders = ranked.map(([id, c]) => {
+      const u = byId.get(id);
+      return {
+        id,
+        name: u?.name || u?.full_name || 'Volunteer',
+        requests: c,
+        rating: u?.rating || 0,
+      };
+    });
+
+    res.json({ leaders });
+  } catch (e) {
+    console.error('[ERROR] Failed to fetch admin leaderboard:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/admin/users', ensureAdmin, async (req, res) => {
+  try {
+    const { q = '', role = 'all', status = 'all', verified = 'all', limit = 200 } = req.query || {};
+    const qNorm = String(q || '').trim().toLowerCase();
+    const roleNorm = String(role || 'all').trim().toLowerCase();
+    const statusNorm = String(status || 'all').trim().toLowerCase();
+    const verifiedNorm = String(verified || 'all').trim().toLowerCase();
+    const lim = Math.min(500, Math.max(1, Number(limit) || 200));
+
+    const { data, error } = await supabase
+      .from(TABLES.USERS)
+      .select('*')
+      .order('updated_at', { ascending: false })
+      .limit(lim);
+    if (error) throw error;
+
+    let users = (data || []).map(parseProfileData);
+
+    users = users.map((u) => {
+      const isBlocked = u.is_blocked === true || u.blocked === true;
+      const isVerified = u.is_verified === true || u.verified === true || u.isApproved === true;
+      const regionVal = u.region || u.city || u.state || u.location || 'N/A';
+      const lastActive = u.last_active_at || u.last_seen_at || u.updated_at || u.created_at || null;
+      const normalizedRole = String(u.role || '').toLowerCase();
+      return {
+        id: u.id,
+        name: u.name || u.full_name || u.displayName || 'Anonymous',
+        email: u.email,
+        phone: u.phone,
+        role: normalizedRole,
+        status: isBlocked ? 'blocked' : 'active',
+        region: regionVal,
+        verified: isVerified,
+        lastActive,
+        raw: u,
+      };
+    });
+
+    if (roleNorm !== 'all') {
+      users = users.filter((u) => u.role === roleNorm);
+    }
+    if (statusNorm !== 'all') {
+      users = users.filter((u) => u.status === statusNorm);
+    }
+    if (verifiedNorm !== 'all') {
+      const want = verifiedNorm === 'true' || verifiedNorm === 'yes' || verifiedNorm === 'verified';
+      users = users.filter((u) => u.verified === want);
+    }
+    if (qNorm) {
+      users = users.filter((u) => {
+        const hay = `${u.name || ''} ${u.email || ''} ${u.phone || ''} ${u.region || ''} ${u.role || ''}`.toLowerCase();
+        return hay.includes(qNorm) || String(u.id).toLowerCase().includes(qNorm);
+      });
+    }
+
+    res.json({ users });
+  } catch (e) {
+    console.error('[ERROR] Failed to fetch admin users:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/admin/users/:id', ensureAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { data, error } = await supabase.from(TABLES.USERS).select('*').eq('id', id).single();
+    if (error) throw error;
+    res.json({ user: parseProfileData(data) });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/admin/users/:id/block', ensureAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { blocked = true } = req.body || {};
+    const updated = await writeUserMetadata(id, { is_blocked: !!blocked, blocked: !!blocked, blocked_at: !!blocked ? new Date().toISOString() : null });
+    emitAdminUpdate({ type: 'user', action: blocked ? 'blocked' : 'unblocked', user: updated });
+    res.json({ user: updated });
+  } catch (e) {
+    console.error('[ERROR] Failed to block/unblock user:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/admin/users/:id/role', ensureAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { role } = req.body || {};
+    if (!role) return res.status(400).json({ error: 'role required' });
+    const roleNorm = String(role).trim().toLowerCase();
+    const now = new Date().toISOString();
+
+    let { data, error } = await supabase
+      .from(TABLES.USERS)
+      .update({ role: roleNorm, updated_at: now })
+      .eq('id', id)
+      .select()
+      .single();
+    if (error) {
+      const fallback = await writeUserMetadata(id, { role: roleNorm, role_updated_at: now });
+      emitAdminUpdate({ type: 'user', action: 'role_changed', user: fallback });
+      return res.json({ user: fallback });
+    }
+    const parsed = parseProfileData(data);
+    emitAdminUpdate({ type: 'user', action: 'role_changed', user: parsed });
+    res.json({ user: parsed });
+  } catch (e) {
+    console.error('[ERROR] Failed to change role:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/admin/users/:id/reset-access', ensureAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const now = new Date().toISOString();
+    const updated = await writeUserMetadata(id, { access_reset_at: now });
+    emitAdminUpdate({ type: 'user', action: 'access_reset', user: updated });
+    res.json({ ok: true, user: updated });
+  } catch (e) {
+    console.error('[ERROR] Failed to reset access:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/admin/ngos', ensureAdmin, async (req, res) => {
+  try {
+    const { q = '', status = 'all', verified = 'all', limit = 200 } = req.query || {};
+    const qNorm = String(q || '').trim().toLowerCase();
+    const statusNorm = String(status || 'all').trim().toLowerCase();
+    const verifiedNorm = String(verified || 'all').trim().toLowerCase();
+    const lim = Math.min(500, Math.max(1, Number(limit) || 200));
+
+    const { data, error } = await supabase
+      .from(TABLES.USERS)
+      .select('*')
+      .eq('role', 'ngo')
+      .order('updated_at', { ascending: false })
+      .limit(lim);
+    if (error) throw error;
+
+    let ngos = (data || []).map(parseProfileData).map((u) => {
+      const isBlocked = u.is_blocked === true || u.blocked === true;
+      const isVerified = u.is_verified === true || u.verified === true;
+      return {
+        id: u.id,
+        name: u.name || u.full_name || 'NGO',
+        email: u.email,
+        phone: u.phone,
+        status: isBlocked ? 'disabled' : 'enabled',
+        verified: isVerified,
+        regions: u.ngo_regions || u.regions || [],
+        serviceTypes: u.ngo_service_types || u.service_types || [],
+        raw: u,
+      };
+    });
+
+    if (statusNorm !== 'all') {
+      ngos = ngos.filter((n) => n.status === statusNorm);
+    }
+    if (verifiedNorm !== 'all') {
+      const want = verifiedNorm === 'true' || verifiedNorm === 'yes' || verifiedNorm === 'verified';
+      ngos = ngos.filter((n) => n.verified === want);
+    }
+    if (qNorm) {
+      ngos = ngos.filter((n) => {
+        const hay = `${n.name || ''} ${n.email || ''} ${n.phone || ''}`.toLowerCase();
+        return hay.includes(qNorm) || String(n.id).toLowerCase().includes(qNorm);
+      });
+    }
+
+    res.json({ ngos });
+  } catch (e) {
+    console.error('[ERROR] Failed to fetch NGOs:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/admin/ngos/:id/verify', ensureAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { verified = true } = req.body || {};
+    const now = new Date().toISOString();
+    const updated = await writeUserMetadata(id, { is_verified: !!verified, verified: !!verified, verified_at: !!verified ? now : null });
+    emitAdminUpdate({ type: 'ngo', action: verified ? 'verified' : 'unverified', ngo: updated });
+    res.json({ ngo: updated });
+  } catch (e) {
+    console.error('[ERROR] Failed to verify NGO:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/admin/ngos/:id/reject', ensureAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { reason = '' } = req.body || {};
+    const now = new Date().toISOString();
+    const updated = await writeUserMetadata(id, { is_verified: false, verified: false, ngo_rejected: true, ngo_rejected_reason: String(reason || ''), ngo_rejected_at: now });
+    emitAdminUpdate({ type: 'ngo', action: 'rejected', ngo: updated });
+    res.json({ ngo: updated });
+  } catch (e) {
+    console.error('[ERROR] Failed to reject NGO:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/admin/ngos/:id/assign', ensureAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { regions = [], serviceTypes = [] } = req.body || {};
+    const updated = await writeUserMetadata(id, {
+      ngo_regions: Array.isArray(regions) ? regions : [regions].filter(Boolean),
+      ngo_service_types: Array.isArray(serviceTypes) ? serviceTypes : [serviceTypes].filter(Boolean),
+      ngo_assigned_at: new Date().toISOString(),
+    });
+    emitAdminUpdate({ type: 'ngo', action: 'assigned', ngo: updated });
+    res.json({ ngo: updated });
+  } catch (e) {
+    console.error('[ERROR] Failed to assign NGO:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/admin/ngos/:id/access', ensureAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { enabled = true } = req.body || {};
+    const updated = await writeUserMetadata(id, { is_blocked: !enabled, blocked: !enabled, blocked_at: !enabled ? new Date().toISOString() : null });
+    emitAdminUpdate({ type: 'ngo', action: enabled ? 'enabled' : 'disabled', ngo: updated });
+    res.json({ ngo: updated });
+  } catch (e) {
+    console.error('[ERROR] Failed to enable/disable NGO:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/admin/seniors', ensureAdmin, async (req, res) => {
+  try {
+    const { q = '', status = 'all', highRisk = 'all', limit = 200 } = req.query || {};
+    const qNorm = String(q || '').trim().toLowerCase();
+    const statusNorm = String(status || 'all').trim().toLowerCase();
+    const riskNorm = String(highRisk || 'all').trim().toLowerCase();
+    const lim = Math.min(500, Math.max(1, Number(limit) || 200));
+
+    const { data, error } = await supabase
+      .from(TABLES.USERS)
+      .select('*')
+      .or('role.eq.elderly,role.eq.senior')
+      .order('updated_at', { ascending: false })
+      .limit(lim);
+    if (error) throw error;
+
+    let seniors = (data || []).map(parseProfileData).map((u) => {
+      const isBlocked = u.is_blocked === true || u.blocked === true;
+      const isHighRisk = u.high_risk === true || u.is_high_risk === true;
+      return {
+        id: u.id,
+        name: u.name || u.full_name || 'Senior',
+        email: u.email,
+        phone: u.phone,
+        status: isBlocked ? 'deactivated' : 'active',
+        region: u.region || u.city || 'N/A',
+        highRisk: isHighRisk,
+        lastActive: u.last_active_at || u.last_seen_at || u.updated_at || u.created_at || null,
+        raw: u,
+      };
+    });
+
+    if (statusNorm !== 'all') seniors = seniors.filter((s) => s.status === statusNorm);
+    if (riskNorm !== 'all') {
+      const want = riskNorm === 'true' || riskNorm === 'yes' || riskNorm === 'high';
+      seniors = seniors.filter((s) => s.highRisk === want);
+    }
+    if (qNorm) {
+      seniors = seniors.filter((s) => {
+        const hay = `${s.name || ''} ${s.email || ''} ${s.phone || ''} ${s.region || ''}`.toLowerCase();
+        return hay.includes(qNorm) || String(s.id).toLowerCase().includes(qNorm);
+      });
+    }
+
+    res.json({ seniors });
+  } catch (e) {
+    console.error('[ERROR] Failed to fetch seniors:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/admin/seniors/:id/deactivate', ensureAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { deactivated = true } = req.body || {};
+    const updated = await writeUserMetadata(id, { is_blocked: !!deactivated, blocked: !!deactivated, blocked_at: !!deactivated ? new Date().toISOString() : null });
+    emitAdminUpdate({ type: 'senior', action: deactivated ? 'deactivated' : 'activated', senior: updated });
+    res.json({ senior: updated });
+  } catch (e) {
+    console.error('[ERROR] Failed to deactivate senior:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/admin/seniors/:id/flag', ensureAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { highRisk = true, reason = '' } = req.body || {};
+    const now = new Date().toISOString();
+    const updated = await writeUserMetadata(id, {
+      high_risk: !!highRisk,
+      high_risk_reason: String(reason || ''),
+      high_risk_flagged_at: !!highRisk ? now : null,
+    });
+    emitAdminUpdate({ type: 'senior', action: highRisk ? 'flagged_high_risk' : 'unflagged_high_risk', senior: updated });
+    res.json({ senior: updated });
+  } catch (e) {
+    console.error('[ERROR] Failed to flag senior:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/admin/seniors/:id/emergency-history', ensureAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const [sosRes, helpRes] = await Promise.all([
+      supabase.from(TABLES.SOS_ALERTS).select('*').or(`senior_id.eq.${id},user_id.eq.${id}`).order('created_at', { ascending: false }).limit(100),
+      supabase.from(TABLES.HELP_REQUESTS).select('*').eq('senior_id', id).order('created_at', { ascending: false }).limit(200),
+    ]);
+
+    const sos = (sosRes?.data || []).map((s) => ({
+      id: s.id,
+      type: 'sos',
+      status: s.status,
+      createdAt: s.created_at,
+      message: s.message || s.description || '',
+    }));
+
+    const help = (helpRes?.data || []).map((r) => ({
+      id: r.id,
+      type: 'help_request',
+      status: r.status,
+      createdAt: r.created_at,
+      category: r.category,
+      priority: r.priority,
+      description: r.description || '',
+    }));
+
+    res.json({ history: [...sos, ...help].sort((a, b) => (Date.parse(b.createdAt || '') || 0) - (Date.parse(a.createdAt || '') || 0)) });
+  } catch (e) {
+    console.error('[ERROR] Failed to fetch emergency history:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/admin/risk', ensureAdmin, async (req, res) => {
+  try {
+    // Mood logs are optional; if table doesn't exist, we still provide a sensible response.
+    const now = new Date();
+    const start = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+
+    let moodLogs = [];
+    try {
+      const { data, error } = await supabase
+        .from(TABLES.MOOD_LOGS)
+        .select('*')
+        .gte('created_at', start.toISOString())
+        .order('created_at', { ascending: false })
+        .limit(2000);
+      if (error) throw error;
+      moodLogs = data || [];
+    } catch {}
+
+    const moodCounts = { happy: 0, okay: 0, sad: 0 };
+    const sadBySenior = new Map();
+
+    moodLogs.forEach((m) => {
+      const moodRaw = String(m.mood || m.value || m.status || '').toLowerCase();
+      const seniorId = m.senior_id || m.user_id || m.seniorId;
+      let bucket = 'okay';
+      if (moodRaw.includes('sad') || moodRaw.includes('low')) bucket = 'sad';
+      else if (moodRaw.includes('happy') || moodRaw.includes('good')) bucket = 'happy';
+      moodCounts[bucket] = (moodCounts[bucket] || 0) + 1;
+      if (bucket === 'sad' && seniorId) sadBySenior.set(seniorId, (sadBySenior.get(seniorId) || 0) + 1);
+    });
+
+    // Also consider seniors with long-pending requests as risk
+    let pending = [];
+    try {
+      const { data, error } = await supabase
+        .from(TABLES.HELP_REQUESTS)
+        .select('*')
+        .eq('status', 'pending')
+        .order('created_at', { ascending: true })
+        .limit(200);
+      if (error) throw error;
+      pending = data || [];
+    } catch {}
+
+    pending.forEach((r) => {
+      const sid = r.senior_id;
+      if (!sid) return;
+      const ageMs = Date.now() - (Date.parse(r.created_at || '') || Date.now());
+      if (ageMs > 24 * 60 * 60 * 1000) {
+        sadBySenior.set(sid, (sadBySenior.get(sid) || 0) + 2);
+      } else if (ageMs > 6 * 60 * 60 * 1000) {
+        sadBySenior.set(sid, (sadBySenior.get(sid) || 0) + 1);
+      }
+    });
+
+    const ranked = Array.from(sadBySenior.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 20);
+
+    const seniorIds = ranked.map(([id]) => id);
+    const seniorsById = new Map();
+    if (seniorIds.length) {
+      try {
+        const { data } = await supabase.from(TABLES.USERS).select('*').in('id', seniorIds);
+        (data || []).forEach((u) => seniorsById.set(u.id, parseProfileData(u)));
+      } catch {}
+    }
+
+    const riskAlerts = ranked.map(([sid, score], idx) => {
+      const level = score >= 4 ? 'high' : score >= 2 ? 'medium' : 'low';
+      return {
+        id: `${sid}-${idx}`,
+        seniorId: sid,
+        seniorName: seniorsById.get(sid)?.name || seniorsById.get(sid)?.full_name || 'Senior',
+        riskLevel: level,
+        reasons: level === 'high' ? ['Repeated low mood / long pending requests'] : ['Needs attention'],
+        lastContact: 'N/A',
+      };
+    });
+
+    const totalMood = moodCounts.happy + moodCounts.okay + moodCounts.sad;
+    const moodTrends = totalMood
+      ? {
+          happy: Math.round((moodCounts.happy / totalMood) * 100),
+          okay: Math.round((moodCounts.okay / totalMood) * 100),
+          sad: Math.round((moodCounts.sad / totalMood) * 100),
+        }
+      : { happy: 0, okay: 0, sad: 0 };
+
+    const riskCategories = {
+      high: riskAlerts.filter((r) => r.riskLevel === 'high').length,
+      medium: riskAlerts.filter((r) => r.riskLevel === 'medium').length,
+      low: Math.max(0, riskAlerts.filter((r) => r.riskLevel === 'low').length),
+    };
+
+    res.json({ riskCategories, riskAlerts, moodTrends });
+  } catch (e) {
+    console.error('[ERROR] Failed to fetch admin risk:', e);
     res.status(500).json({ error: e.message });
   }
 });

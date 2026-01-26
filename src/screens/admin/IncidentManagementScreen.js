@@ -1,5 +1,5 @@
 // Incident Management Screen
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { 
   View, 
   Text, 
@@ -8,72 +8,126 @@ import {
   ScrollView,
   TouchableOpacity,
   TextInput,
+  ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { colors, typography, spacing, borderRadius, shadows } from '../../theme';
+import { BACKEND_URL as API_BASE } from '../../config/backend';
+import { logout } from '../../services/authService';
+import { getSocket, identify } from '../../services/socketService';
 
 const IncidentManagementScreen = ({ navigation }) => {
   const [activeTab, setActiveTab] = useState('open');
   const [searchQuery, setSearchQuery] = useState('');
 
-  const [incidents] = useState([
-    {
-      id: '1',
-      type: 'SOS',
-      priority: 'critical',
-      seniorName: 'Verma Ji',
-      description: 'Emergency SOS triggered - no response to calls',
-      status: 'open',
-      assignee: 'Unassigned',
-      createdAt: '2 hours ago',
-      escalated: true,
-    },
-    {
-      id: '2',
-      type: 'Welfare Check',
-      priority: 'high',
-      seniorName: 'Sharma Aunty',
-      description: 'Missed 3 consecutive check-ins',
-      status: 'open',
-      assignee: 'Rahul Kumar',
-      createdAt: '4 hours ago',
-      escalated: false,
-    },
-    {
-      id: '3',
-      type: 'Medical',
-      priority: 'high',
-      seniorName: 'Gupta Uncle',
-      description: 'Medication not picked up for 2 days',
-      status: 'in_progress',
-      assignee: 'Priya Singh',
-      createdAt: '6 hours ago',
-      escalated: false,
-    },
-    {
-      id: '4',
-      type: 'Mood Alert',
-      priority: 'medium',
-      seniorName: 'Patel Ji',
-      description: 'Consistently reporting low mood for a week',
-      status: 'in_progress',
-      assignee: 'Amit Sharma',
-      createdAt: '1 day ago',
-      escalated: false,
-    },
-    {
-      id: '5',
-      type: 'Service Issue',
-      priority: 'low',
-      seniorName: 'Singh Aunty',
-      description: 'Grocery delivery delayed',
-      status: 'resolved',
-      assignee: 'System',
-      createdAt: '2 days ago',
-      escalated: false,
-      resolvedAt: '1 day ago',
-    },
-  ]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [incidents, setIncidents] = useState([]);
+
+  useEffect(() => {
+    loadIncidents();
+
+    const initRealtime = async () => {
+      try {
+        const profileJson = await AsyncStorage.getItem('userProfile');
+        const profile = profileJson ? JSON.parse(profileJson) : null;
+        const userId = profile?.id || profile?.uid || profile?.userId;
+        if (userId) {
+          identify({ userId, role: 'ADMIN' });
+        }
+
+        const socket = getSocket();
+        const onUpdate = () => {
+          loadIncidents();
+        };
+        socket.off('admin:update');
+        socket.on('admin:update', onUpdate);
+      } catch (e) {
+        // ignore
+      }
+    };
+
+    initRealtime();
+
+    return () => {
+      try {
+        const socket = getSocket();
+        socket.off('admin:update');
+      } catch (e) {
+        // ignore
+      }
+    };
+  }, []);
+
+  const formatTimeAgo = (date) => {
+    if (!date) return '—';
+    const now = new Date();
+    const past = date instanceof Date ? date : new Date(date);
+    const diff = now - past;
+    const minutes = Math.floor(diff / (1000 * 60));
+    const hours = Math.floor(diff / (1000 * 60 * 60));
+    const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+    if (minutes < 1) return 'Just now';
+    if (minutes < 60) return `${minutes} mins ago`;
+    if (hours < 24) return `${hours} hours ago`;
+    return `${days} days ago`;
+  };
+
+  const loadIncidents = async () => {
+    try {
+      setLoading(true);
+      const token = await AsyncStorage.getItem('userToken');
+      if (!token) {
+        navigation.replace('Login');
+        return;
+      }
+
+      const q = String(searchQuery || '').trim();
+      const url = `${API_BASE}/admin/incidents?status=all${q ? `&q=${encodeURIComponent(q)}` : ''}`;
+      const resp = await fetch(url, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+
+      if (resp.status === 401) {
+        await logout();
+        navigation.replace('Login');
+        return;
+      }
+
+      if (!resp.ok) throw new Error('Failed to load incidents');
+      const data = await resp.json();
+      const mapped = (data?.incidents || []).map((i) => {
+        const seniorName = i?.senior?.name || i?.senior?.full_name || 'Senior';
+        const isEscalation = String(i?.type || '').toLowerCase().includes('escalation') || i?.source === 'help_request';
+        const status = i?.status === 'resolved' ? 'resolved' : (isEscalation ? 'in_progress' : 'open');
+        return {
+          id: i.id,
+          type: isEscalation ? 'Escalation' : (i.type || 'SOS'),
+          priority: i.priority || (isEscalation ? 'high' : 'critical'),
+          seniorName,
+          description: i.description || '',
+          status,
+          assignee: 'Unassigned',
+          createdAt: formatTimeAgo(i.createdAt),
+          escalated: isEscalation,
+        };
+      });
+
+      setIncidents(mapped);
+    } catch (e) {
+      // ignore
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await loadIncidents();
+  };
 
   const getPriorityColor = (priority) => {
     switch (priority) {
@@ -105,18 +159,26 @@ const IncidentManagementScreen = ({ navigation }) => {
     }
   };
 
-  const filteredIncidents = incidents.filter(incident => {
-    if (activeTab === 'open') return incident.status === 'open';
-    if (activeTab === 'in_progress') return incident.status === 'in_progress';
-    if (activeTab === 'resolved') return incident.status === 'resolved';
-    return true;
-  });
+  const filteredIncidents = useMemo(() => {
+    const normalized = (searchQuery || '').trim().toLowerCase();
+    return incidents.filter(incident => {
+      if (activeTab === 'open' && incident.status !== 'open') return false;
+      if (activeTab === 'in_progress' && incident.status !== 'in_progress') return false;
+      if (activeTab === 'resolved' && incident.status !== 'resolved') return false;
+      if (!normalized) return true;
+      return (
+        String(incident.seniorName || '').toLowerCase().includes(normalized) ||
+        String(incident.description || '').toLowerCase().includes(normalized) ||
+        String(incident.type || '').toLowerCase().includes(normalized)
+      );
+    });
+  }, [incidents, activeTab, searchQuery]);
 
-  const stats = {
+  const stats = useMemo(() => ({
     open: incidents.filter(i => i.status === 'open').length,
     inProgress: incidents.filter(i => i.status === 'in_progress').length,
     resolved: incidents.filter(i => i.status === 'resolved').length,
-  };
+  }), [incidents]);
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -212,7 +274,19 @@ const IncidentManagementScreen = ({ navigation }) => {
       <ScrollView 
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={[colors.primary.main]}
+          />
+        }
       >
+        {loading && (
+          <View style={{ paddingVertical: spacing.md }}>
+            <ActivityIndicator size="small" color={colors.primary.main} />
+          </View>
+        )}
         {filteredIncidents.map(incident => (
           <TouchableOpacity 
             key={incident.id}

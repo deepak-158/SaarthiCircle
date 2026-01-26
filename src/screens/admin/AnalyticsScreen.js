@@ -1,5 +1,5 @@
 // Analytics Dashboard Screen
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { 
   View, 
   Text, 
@@ -8,61 +8,152 @@ import {
   ScrollView,
   TouchableOpacity,
   Dimensions,
+  ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { colors, typography, spacing, borderRadius, shadows } from '../../theme';
+import { BACKEND_URL as API_BASE } from '../../config/backend';
+import { logout } from '../../services/authService';
+import { getSocket, identify } from '../../services/socketService';
 
 const { width } = Dimensions.get('window');
 
 const AnalyticsScreen = ({ navigation }) => {
   const [selectedPeriod, setSelectedPeriod] = useState('week');
 
-  const [metrics] = useState({
-    helpRequests: {
-      total: 456,
-      change: +12,
-      breakdown: {
-        medicine: 180,
-        groceries: 120,
-        transport: 96,
-        other: 60,
-      }
-    },
-    responseTime: {
-      average: '12 min',
-      change: -3,
-    },
-    satisfaction: {
-      score: 4.7,
-      change: +0.2,
-    },
-    activeUsers: {
-      seniors: 1247,
-      caregivers: 89,
-      changeS: +45,
-      changeC: +8,
-    },
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const [metrics, setMetrics] = useState({
+    helpRequests: { total: 0, change: 0, breakdown: {} },
+    responseTime: { average: '—', change: 0 },
+    satisfaction: { score: 0, change: 0 },
+    activeUsers: { seniors: 0, caregivers: 0, changeS: 0, changeC: 0 },
   });
 
-  const [topCaregivers] = useState([
-    { name: 'Rahul Kumar', requests: 45, rating: 4.9 },
-    { name: 'Priya Singh', requests: 42, rating: 4.8 },
-    { name: 'Amit Sharma', requests: 38, rating: 4.9 },
-    { name: 'Neha Gupta', requests: 35, rating: 4.7 },
-    { name: 'Vikram Patel', requests: 33, rating: 4.8 },
-  ]);
+  const [topCaregivers, setTopCaregivers] = useState([]);
+  const [weeklyData, setWeeklyData] = useState([]);
 
-  const [weeklyData] = useState([
-    { day: 'Mon', requests: 65 },
-    { day: 'Tue', requests: 72 },
-    { day: 'Wed', requests: 58 },
-    { day: 'Thu', requests: 80 },
-    { day: 'Fri', requests: 75 },
-    { day: 'Sat', requests: 45 },
-    { day: 'Sun', requests: 42 },
-  ]);
+  const maxRequests = useMemo(() => {
+    if (!weeklyData.length) return 1;
+    return Math.max(...weeklyData.map(d => d.requests || 0), 1);
+  }, [weeklyData]);
 
-  const maxRequests = Math.max(...weeklyData.map(d => d.requests));
+  useEffect(() => {
+    loadAnalytics();
+
+    const initRealtime = async () => {
+      try {
+        const profileJson = await AsyncStorage.getItem('userProfile');
+        const profile = profileJson ? JSON.parse(profileJson) : null;
+        const userId = profile?.id || profile?.uid || profile?.userId;
+        if (userId) {
+          identify({ userId, role: 'ADMIN' });
+        }
+
+        const socket = getSocket();
+        const onUpdate = () => {
+          loadAnalytics();
+        };
+        socket.off('admin:update');
+        socket.on('admin:update', onUpdate);
+      } catch (e) {
+        // ignore
+      }
+    };
+
+    initRealtime();
+
+    return () => {
+      try {
+        const socket = getSocket();
+        socket.off('admin:update');
+      } catch (e) {
+        // ignore
+      }
+    };
+  }, [selectedPeriod]);
+
+  const mapPeriodParam = (p) => {
+    const v = String(p || '').toLowerCase();
+    if (v === 'today') return 'today';
+    if (v === 'month') return 'month';
+    if (v === 'year') return 'year';
+    return 'week';
+  };
+
+  const loadAnalytics = async () => {
+    try {
+      setLoading(true);
+      const token = await AsyncStorage.getItem('userToken');
+      if (!token) {
+        navigation.replace('Login');
+        return;
+      }
+
+      const period = mapPeriodParam(selectedPeriod);
+
+      const [analyticsResp, statsResp, leadersResp] = await Promise.all([
+        fetch(`${API_BASE}/admin/analytics?period=${encodeURIComponent(period)}`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        }),
+        fetch(`${API_BASE}/admin/stats`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        }),
+        fetch(`${API_BASE}/admin/leaderboard/caregivers?period=${encodeURIComponent(period)}&limit=5`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        })
+      ]);
+
+      if (analyticsResp.status === 401 || statsResp.status === 401 || leadersResp.status === 401) {
+        await logout();
+        navigation.replace('Login');
+        return;
+      }
+
+      const analyticsJson = analyticsResp.ok ? await analyticsResp.json() : null;
+      const statsJson = statsResp.ok ? await statsResp.json() : null;
+      const leadersJson = leadersResp.ok ? await leadersResp.json() : null;
+
+      const total = analyticsJson?.metrics?.helpRequests?.total ?? 0;
+      const breakdown = analyticsJson?.metrics?.helpRequests?.breakdown ?? {};
+      const avgMinutes = analyticsJson?.metrics?.responseTime?.averageMinutes;
+
+      setWeeklyData((analyticsJson?.trend || []).map((t) => {
+        const d = String(t.day || '');
+        const label = d.length >= 10 ? d.slice(5) : d;
+        return { day: label || '—', requests: t.requests || 0 };
+      }));
+
+      setTopCaregivers((leadersJson?.leaders || []).map((l) => ({
+        name: l.name,
+        requests: l.requests || 0,
+        rating: l.rating || 0,
+      })));
+
+      const seniors = statsJson?.stats?.totalSeniors ?? 0;
+      const caregivers = statsJson?.stats?.activeCaregivers ?? 0;
+
+      setMetrics({
+        helpRequests: { total, change: 0, breakdown },
+        responseTime: { average: avgMinutes ? `${avgMinutes} min` : '—', change: 0 },
+        satisfaction: { score: 0, change: 0 },
+        activeUsers: { seniors, caregivers, changeS: 0, changeC: 0 },
+      });
+    } catch (e) {
+      // ignore
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await loadAnalytics();
+  };
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -112,7 +203,19 @@ const AnalyticsScreen = ({ navigation }) => {
       <ScrollView 
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={[colors.primary.main]}
+          />
+        }
       >
+        {loading && (
+          <View style={{ paddingVertical: spacing.md }}>
+            <ActivityIndicator size="small" color={colors.primary.main} />
+          </View>
+        )}
         {/* Key Metrics Row */}
         <View style={styles.metricsRow}>
           <View style={[styles.metricCard, shadows.sm]}>
@@ -214,18 +317,20 @@ const AnalyticsScreen = ({ navigation }) => {
               colors.neutral.gray
             ];
             const icons = ['pill', 'basket', 'car', 'dots-horizontal'];
+            const color = categoryColors[index % categoryColors.length];
+            const icon = icons[index % icons.length];
             
             return (
               <View key={category} style={styles.breakdownItem}>
                 <View style={styles.breakdownLeft}>
                   <View style={[
                     styles.categoryIcon,
-                    { backgroundColor: categoryColors[index] + '20' }
+                    { backgroundColor: color + '20' }
                   ]}>
                     <MaterialCommunityIcons
-                      name={icons[index]}
+                      name={icon}
                       size={20}
-                      color={categoryColors[index]}
+                      color={color}
                     />
                   </View>
                   <Text style={styles.categoryName}>
@@ -239,7 +344,7 @@ const AnalyticsScreen = ({ navigation }) => {
                         styles.progressFill,
                         { 
                           width: `${percentage}%`,
-                          backgroundColor: categoryColors[index]
+                          backgroundColor: color
                         }
                       ]}
                     />

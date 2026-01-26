@@ -22,4 +22,5 @@ export const TABLES = {
   MESSAGES: 'messages',
   OTP_CODES: 'otp_codes',
   PENDING_APPROVALS: 'pending_approvals',
+  NGOS: 'ngos',
 };
