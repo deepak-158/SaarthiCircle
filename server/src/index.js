@@ -3888,7 +3888,7 @@ app.get('/admin/stats', ensureAdmin, async (req, res) => {
       supabase.from(TABLES.USERS).select('*', { count: 'exact', head: true }).eq('role', 'ngo_pending'),
       supabase.from(TABLES.USERS).select('*', { count: 'exact', head: true }).eq('role', 'ngo_rejected'),
       // Pending help requests
-      supabase.from(TABLES.HELP_REQUESTS).select('*', { count: 'exact', head: true }).eq('status', 'pending'),
+      supabase.from(TABLES.USERS).select('*', { count: 'exact', head: true }).eq('role', 'ngo_pending'),
       supabase.from(TABLES.SOS_ALERTS).select('*', { count: 'exact', head: true }).eq('status', 'active'),
       supabase.from(TABLES.HELP_REQUESTS).select('*', { count: 'exact', head: true }).eq('status', 'completed'),
       // Best-effort resolved breakdown (depends on schema having volunteer_id)
@@ -4370,18 +4370,15 @@ app.post('/admin/ngos/:id/verify', ensureAdmin, async (req, res) => {
     const { verified = true } = req.body || {};
     const now = new Date().toISOString();
     const updated = await writeUserMetadata(id, {
-      superadmin_request: {
-        type: 'ngo_verify',
-        requested_by: req.user.id,
-        requested_at: now,
-        payload: { verified: !!verified },
-      },
+      admin_docs_verified: !!verified,
+      admin_docs_verified_at: !!verified ? now : null,
+      admin_docs_verified_by: req.user.id,
     });
     try {
-      await createAuditLog(req.user.id, 'ngo_verify_requested', 'ngo', id, { verified: !!verified, requested_at: now });
+      await createAuditLog(req.user.id, 'ngo_docs_verified', 'ngo', id, { verified: !!verified, at: now });
     } catch {}
-    emitAdminUpdate({ type: 'ngo', action: 'verify_requested', ngo: updated });
-    res.json({ ngo: updated, queuedForSuperAdmin: true });
+    emitAdminUpdate({ type: 'ngo', action: !!verified ? 'docs_verified' : 'docs_unverified', ngo: updated });
+    res.json({ ngo: updated, docsVerified: !!verified });
   } catch (e) {
     console.error('[ERROR] Failed to verify NGO:', e);
     res.status(500).json({ error: e.message });

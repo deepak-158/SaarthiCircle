@@ -128,7 +128,9 @@ const NGOApprovalScreen = ({ navigation }) => {
       });
       const data = await resp.json();
       if (!resp.ok) throw new Error(data.error || 'Verify failed');
-      if (data?.queuedForSuperAdmin) {
+      if (data?.docsVerified !== undefined) {
+        Alert.alert('Updated', data.docsVerified ? 'Documents marked as verified.' : 'Documents marked as unverified.');
+      } else if (data?.queuedForSuperAdmin) {
         Alert.alert('Submitted', 'Queued for SuperAdmin approval.');
       }
       await loadNgos();
@@ -206,7 +208,7 @@ const NGOApprovalScreen = ({ navigation }) => {
       const data = await resp.json();
       if (!resp.ok) throw new Error(data.error || 'Approve failed');
       if (data?.queuedForSuperAdmin) {
-        Alert.alert('Submitted', 'Queued for SuperAdmin approval.');
+        Alert.alert('Submitted', 'Request sent to SuperAdmin for final approval.');
       }
       await loadNgos();
     } catch (e) {
@@ -284,6 +286,11 @@ const NGOApprovalScreen = ({ navigation }) => {
           {list.length ? (
             list.map((ngo) => (
               <View key={ngo.id} style={styles.card}>
+                {activeTab === 'pending' && ngo?.raw?.superadmin_request ? (
+                  <View style={styles.pendingBanner}>
+                    <Text style={styles.pendingBannerText}>Waiting for SuperAdmin approval</Text>
+                  </View>
+                ) : null}
                 <View style={styles.cardTop}>
                   <View style={styles.avatar}>
                     <MaterialCommunityIcons name="office-building" size={26} color={colors.primary.main} />
@@ -311,19 +318,19 @@ const NGOApprovalScreen = ({ navigation }) => {
                     <TouchableOpacity
                       style={[styles.btn, styles.btnDanger]}
                       onPress={() => rejectNgo(ngo)}
-                      disabled={processingId === ngo.id}
+                      disabled={processingId === ngo.id || !!ngo?.raw?.superadmin_request}
                     >
                       <Text style={styles.btnTextDanger}>Reject</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
                       style={[styles.btn, styles.btnPrimary]}
                       onPress={() => approveNgo(ngo)}
-                      disabled={processingId === ngo.id}
+                      disabled={processingId === ngo.id || !!ngo?.raw?.superadmin_request}
                     >
                       {processingId === ngo.id ? (
                         <ActivityIndicator color={colors.neutral.white} size="small" />
                       ) : (
-                        <Text style={styles.btnTextPrimary}>Approve</Text>
+                        <Text style={styles.btnTextPrimary}>Send to SuperAdmin</Text>
                       )}
                     </TouchableOpacity>
                   </View>
@@ -523,6 +530,20 @@ const styles = StyleSheet.create({
   btnTextPrimary: { color: colors.neutral.white, fontSize: typography.sizes.md, fontWeight: typography.weights.medium },
   btnTextDanger: { color: colors.status.error, fontSize: typography.sizes.md, fontWeight: typography.weights.medium },
   btnTextNeutral: { color: colors.neutral.black, fontSize: typography.sizes.md, fontWeight: typography.weights.medium },
+  pendingBanner: {
+    marginBottom: spacing.md,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    borderRadius: 12,
+    backgroundColor: '#FFF8E1',
+    borderWidth: 1,
+    borderColor: '#FFECB3',
+  },
+  pendingBannerText: {
+    fontSize: typography.sizes.sm,
+    color: colors.neutral.black,
+    fontWeight: typography.weights.medium,
+  },
   empty: { alignItems: 'center', paddingVertical: spacing.xxl },
   emptyTitle: { marginTop: spacing.md, fontSize: typography.sizes.lg, fontWeight: typography.weights.bold, color: colors.neutral.black },
   emptySubtitle: { marginTop: spacing.xs, fontSize: typography.sizes.md, color: colors.neutral.gray, textAlign: 'center' },
