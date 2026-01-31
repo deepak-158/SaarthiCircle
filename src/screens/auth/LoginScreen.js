@@ -294,55 +294,7 @@ const LoginScreen = ({ navigation }) => {
                 </>
               )}
 
-              <TouchableOpacity 
-                style={styles.registerLink} 
-                onPress={() => navigation.navigate('Register')}
-              >
-                <Text style={styles.registerLinkText}>
-                  Don't have an account? <Text style={styles.registerLinkHighlight}>Register</Text>
-                </Text>
-              </TouchableOpacity>
-            </View>
-
-            <View style={styles.demoSection}>
-              <Text style={styles.orText}>─────  or try demo mode  ─────</Text>
-              <View style={styles.demoButtons}>
-                <TouchableOpacity
-                  style={[styles.demoButton, { backgroundColor: colors.primary.main }]}
-                  onPress={() => handleDemoLogin('elderly')}
-                  disabled={loading}
-                >
-                  <MaterialCommunityIcons name="account" size={24} color={colors.neutral.white} />
-                  <Text style={styles.demoButtonText}>Senior</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[styles.demoButton, { backgroundColor: '#4CAF50' }]}
-                  onPress={() => handleDemoLogin('volunteer')}
-                  disabled={loading}
-                >
-                  <MaterialCommunityIcons name="hand-heart" size={24} color={colors.neutral.white} />
-                  <Text style={styles.demoButtonText}>Volunteer</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[styles.demoButton, { backgroundColor: '#FF6B35' }]}
-                  onPress={() => handleDemoLogin('admin')}
-                  disabled={loading}
-                >
-                  <MaterialCommunityIcons name="shield-account" size={24} color={colors.neutral.white} />
-                  <Text style={styles.demoButtonText}>Admin</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[styles.demoButton, { backgroundColor: '#1565C0' }]}
-                  onPress={() => handleDemoLogin('ngo')}
-                  disabled={loading}
-                >
-                  <MaterialCommunityIcons name="office-building" size={24} color={colors.neutral.white} />
-                  <Text style={styles.demoButtonText}>NGO</Text>
-                </TouchableOpacity>
-              </View>
+              
             </View>
 
             <View style={styles.footer}>

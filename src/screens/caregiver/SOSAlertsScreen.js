@@ -9,49 +9,99 @@ import {
   TouchableOpacity,
   Animated,
   Vibration,
+  Alert,
+  Linking,
+  Platform,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { LargeButton } from '../../components/common';
 import { colors, typography, spacing, borderRadius, shadows } from '../../theme';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { BACKEND_URL as API_BASE } from '../../config/backend';
+import { logout } from '../../services/authService';
+import { getSocket, identify } from '../../services/socketService';
 
 const SOSAlertsScreen = ({ navigation }) => {
-  const [alerts, setAlerts] = useState([
-    {
-      id: '1',
-      seniorName: 'Verma Ji',
-      age: 78,
-      type: 'SOS Emergency',
-      time: '2 mins ago',
-      location: 'D-45, Vasant Kunj, New Delhi',
-      phone: '+91 98765 43210',
-      status: 'active',
-      medicalInfo: 'Heart condition, Diabetes',
-    },
-    {
-      id: '2',
-      seniorName: 'Gupta Aunty',
-      age: 68,
-      type: 'Wellness Check',
-      time: '15 mins ago',
-      location: 'B-12, Lajpat Nagar, New Delhi',
-      phone: '+91 87654 32109',
-      status: 'pending',
-      medicalInfo: 'Arthritis',
-    },
-    {
-      id: '3',
-      seniorName: 'Singh Uncle',
-      age: 82,
-      type: 'Low Mood Alert',
-      time: '1 hour ago',
-      location: 'C-89, Saket, New Delhi',
-      phone: '+91 76543 21098',
-      status: 'acknowledged',
-      medicalInfo: 'Blood Pressure',
-    },
-  ]);
+  const [alerts, setAlerts] = useState([]);
+  const [loading, setLoading] = useState(true);
 
   const pulseAnim = useRef(new Animated.Value(1)).current;
+
+  const formatTimeAgo = (date) => {
+    if (!date) return '—';
+    const now = new Date();
+    const past = date instanceof Date ? date : new Date(date);
+    const diff = now - past;
+    const minutes = Math.floor(diff / (1000 * 60));
+    const hours = Math.floor(diff / (1000 * 60 * 60));
+    const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+    if (minutes < 1) return 'Just now';
+    if (minutes < 60) return `${minutes} mins ago`;
+    if (hours < 24) return `${hours} hours ago`;
+    return `${days} days ago`;
+  };
+
+  const getTokenOrLogout = async () => {
+    const token = await AsyncStorage.getItem('userToken');
+    if (!token) {
+      navigation.replace('Login');
+      return null;
+    }
+    return token;
+  };
+
+  const mapAlert = (row) => {
+    const senior = row?.senior || null;
+    const seniorName = senior?.name || senior?.full_name || 'Senior';
+    const phone = senior?.phone || senior?.phoneNumber || senior?.mobile || '';
+    const createdAt = row?.created_at || row?.createdAt;
+    const statusRaw = String(row?.status || 'active').toLowerCase();
+    const status = statusRaw === 'accepted' || statusRaw === 'in_progress' ? 'acknowledged' : statusRaw;
+    const typeText = row?.type ? String(row.type) : 'SOS Emergency';
+
+    const lat = row?.latitude;
+    const lng = row?.longitude;
+    const locText = (lat !== undefined && lng !== undefined)
+      ? `Lat ${Number(lat).toFixed(5)}, Lng ${Number(lng).toFixed(5)}`
+      : 'Location not available';
+
+    return {
+      id: row?.id,
+      seniorId: senior?.id || row?.senior_id || row?.user_id || row?.seniorId,
+      seniorName,
+      type: typeText === 'panic' ? 'SOS Emergency' : typeText,
+      time: formatTimeAgo(createdAt),
+      location: locText,
+      phone,
+      status,
+      medicalInfo: senior?.medical_info || senior?.medicalInfo || '—',
+      raw: row,
+    };
+  };
+
+  const loadAlerts = async () => {
+    try {
+      setLoading(true);
+      const token = await getTokenOrLogout();
+      if (!token) return;
+      const resp = await fetch(`${API_BASE}/volunteer/sos-alerts?status=all`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (resp.status === 401) {
+        await logout();
+        navigation.replace('Login');
+        return;
+      }
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.error || 'Failed to load SOS alerts');
+      const rows = Array.isArray(data?.alerts) ? data.alerts : [];
+      setAlerts(rows.map(mapAlert));
+    } catch (e) {
+      // ignore
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
     // Pulse animation for active alerts
@@ -70,12 +120,70 @@ const SOSAlertsScreen = ({ navigation }) => {
       ])
     ).start();
 
+    loadAlerts();
+
+    const initRealtime = async () => {
+      try {
+        const profileJson = await AsyncStorage.getItem('userProfile');
+        const profile = profileJson ? JSON.parse(profileJson) : null;
+        const userId = profile?.id || profile?.uid || profile?.userId;
+        if (userId) {
+          identify({ userId, role: 'VOLUNTEER' });
+        }
+
+        const socket = getSocket();
+        const onNew = (payload) => {
+          try {
+            const incoming = mapAlert(payload?.alert || payload);
+            setAlerts((prev) => {
+              const exists = prev.some((a) => String(a.id) === String(incoming.id));
+              if (exists) return prev;
+              return [incoming, ...prev];
+            });
+            Vibration.vibrate([300, 200, 300]);
+          } catch {}
+        };
+        const onAssigned = (payload) => {
+          try {
+            const incoming = mapAlert(payload?.alert || payload);
+            setAlerts((prev) => {
+              const idx = prev.findIndex((a) => String(a.id) === String(incoming.id));
+              if (idx === -1) return [incoming, ...prev];
+              const next = [...prev];
+              next[idx] = { ...next[idx], ...incoming };
+              return next;
+            });
+            Vibration.vibrate([300, 200, 300]);
+          } catch {}
+        };
+
+        socket.off('sos:new');
+        socket.off('sos:assigned');
+        socket.on('sos:new', onNew);
+        socket.on('sos:assigned', onAssigned);
+      } catch (e) {
+        // ignore
+      }
+    };
+
+    initRealtime();
+
+    return () => {
+      try {
+        const socket = getSocket();
+        socket.off('sos:new');
+        socket.off('sos:assigned');
+      } catch {}
+    };
+  }, []);
+
+  useEffect(() => {
     // Vibrate for active SOS alerts
     const activeAlerts = alerts.filter(a => a.status === 'active');
     if (activeAlerts.length > 0) {
       Vibration.vibrate([500, 500, 500]);
     }
-  }, []);
+  }, [alerts]);
 
   const handleAcknowledge = (alertId) => {
     setAlerts(prev => 
@@ -87,23 +195,58 @@ const SOSAlertsScreen = ({ navigation }) => {
     );
   };
 
-  const handleRespond = (alert) => {
-    navigation.navigate('CaregiverInteraction', { requestId: alert.id });
+  const handleRespond = async (alert) => {
+    // Accept/lock SOS first
+    try {
+      const token = await getTokenOrLogout();
+      if (!token) return;
+      const resp = await fetch(`${API_BASE}/sos-alerts/${alert.id}/accept`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.error || 'Failed to accept SOS');
+      handleAcknowledge(alert.id);
+      Alert.alert('Accepted', 'You have accepted this SOS.');
+    } catch (e) {
+      Alert.alert('Error', e.message || 'Failed to accept SOS');
+    }
   };
 
-  const handleEscalate = (alertId) => {
-    // Escalate to NGO/Admin
-    setAlerts(prev => 
-      prev.map(alert => 
-        alert.id === alertId 
-          ? { ...alert, status: 'escalated' }
-          : alert
-      )
-    );
+  const handleEscalate = async (alertId) => {
+    // Volunteer escalation maps to making SOS in_progress (or keep acknowledged) and rely on admin escalation timers.
+    try {
+      const token = await getTokenOrLogout();
+      if (!token) return;
+      await fetch(`${API_BASE}/sos-alerts/${alertId}/status`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'in_progress' }),
+      });
+      setAlerts(prev => prev.map(a => (a.id === alertId ? { ...a, status: 'acknowledged' } : a)));
+      Alert.alert('Updated', 'Marked as in progress. Admin/NGO will be notified automatically if needed.');
+    } catch (e) {
+      Alert.alert('Error', e.message || 'Failed to update SOS');
+    }
   };
 
-  const handleCall = (phone) => {
-    // Initiate call
+  const handleCall = async (phone) => {
+    const p = String(phone || '').trim();
+    if (!p) {
+      Alert.alert('Missing phone', 'Senior phone number is not available.');
+      return;
+    }
+    const url = Platform.OS === 'ios' ? `telprompt:${p}` : `tel:${p}`;
+    try {
+      const ok = await Linking.canOpenURL(url);
+      if (!ok) {
+        Alert.alert('Cannot call', `Please dial ${p} manually.`);
+        return;
+      }
+      await Linking.openURL(url);
+    } catch (e) {
+      Alert.alert('Call failed', e?.message || `Please dial ${p} manually.`);
+    }
   };
 
   const getStatusColor = (status) => {

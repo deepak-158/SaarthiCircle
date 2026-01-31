@@ -10,6 +10,8 @@ import {
   TextInput,
   ActivityIndicator,
   RefreshControl,
+  Alert,
+  Linking,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -25,6 +27,15 @@ const IncidentManagementScreen = ({ navigation }) => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [incidents, setIncidents] = useState([]);
+
+  const getTokenOrLogout = async () => {
+    const token = await AsyncStorage.getItem('userToken');
+    if (!token) {
+      navigation.replace('Login');
+      return null;
+    }
+    return token;
+  };
 
   useEffect(() => {
     loadIncidents();
@@ -100,18 +111,24 @@ const IncidentManagementScreen = ({ navigation }) => {
       const data = await resp.json();
       const mapped = (data?.incidents || []).map((i) => {
         const seniorName = i?.senior?.name || i?.senior?.full_name || 'Senior';
+        const seniorPhone = i?.senior?.phone || i?.senior?.phoneNumber || i?.senior?.mobile || null;
+        const seniorId = i?.senior?.id || i?.seniorId || i?.senior_id || null;
         const isEscalation = String(i?.type || '').toLowerCase().includes('escalation') || i?.source === 'help_request';
         const status = i?.status === 'resolved' ? 'resolved' : (isEscalation ? 'in_progress' : 'open');
         return {
           id: i.id,
+          source: i?.source || null,
           type: isEscalation ? 'Escalation' : (i.type || 'SOS'),
           priority: i.priority || (isEscalation ? 'high' : 'critical'),
           seniorName,
+          seniorPhone,
+          seniorId,
           description: i.description || '',
           status,
           assignee: 'Unassigned',
           createdAt: formatTimeAgo(i.createdAt),
           escalated: isEscalation,
+          raw: i,
         };
       });
 
@@ -156,6 +173,107 @@ const IncidentManagementScreen = ({ navigation }) => {
       case 'in_progress': return colors.accent.orange;
       case 'resolved': return colors.secondary.green;
       default: return colors.neutral.gray;
+    }
+  };
+
+  const callSenior = async (incident) => {
+    const phone = String(incident?.seniorPhone || '').trim();
+    if (!phone) {
+      Alert.alert('Missing phone', 'Senior phone number is not available for this incident.');
+      return;
+    }
+    const url = `tel:${phone}`;
+    try {
+      const ok = await Linking.canOpenURL(url);
+      if (!ok) {
+        Alert.alert('Cannot call', `Please dial ${phone} manually.`);
+        return;
+      }
+      await Linking.openURL(url);
+    } catch (e) {
+      Alert.alert('Call failed', e?.message || `Please dial ${phone} manually.`);
+    }
+  };
+
+  const escalateIncident = async (incident) => {
+    if (incident?.source !== 'sos_alert') {
+      Alert.alert('Not supported', 'Escalation from this screen is currently supported only for SOS incidents.');
+      return;
+    }
+    const token = await getTokenOrLogout();
+    if (!token) return;
+
+    try {
+      const resp = await fetch(`${API_BASE}/admin/sos-alerts/${incident.id}/escalate`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason: 'Escalated by Admin from Incident Management' }),
+      });
+
+      if (resp.status === 401) {
+        await logout();
+        navigation.replace('Login');
+        return;
+      }
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.error || 'Failed to escalate');
+
+      Alert.alert('Escalated', 'Escalated to SuperAdmin.');
+      loadIncidents();
+    } catch (e) {
+      Alert.alert('Error', e.message || 'Failed to escalate');
+    }
+  };
+
+  const assignVolunteer = async (incident) => {
+    if (incident?.source !== 'sos_alert') {
+      Alert.alert('Not supported', 'Volunteer assignment from this screen is currently supported only for SOS incidents.');
+      return;
+    }
+    const token = await getTokenOrLogout();
+    if (!token) return;
+
+    try {
+      const volsResp = await fetch(`${API_BASE}/volunteers/available`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (volsResp.status === 401) {
+        await logout();
+        navigation.replace('Login');
+        return;
+      }
+
+      const volsData = await volsResp.json();
+      const volunteers = Array.isArray(volsData?.volunteers) ? volsData.volunteers : [];
+      if (!volunteers.length) {
+        Alert.alert('No volunteers', 'No approved online volunteers are available right now.');
+        return;
+      }
+
+      const buttons = volunteers.slice(0, 5).map((v) => ({
+        text: v.name || v.full_name || v.email || String(v.id).slice(0, 8),
+        onPress: async () => {
+          try {
+            const resp = await fetch(`${API_BASE}/admin/sos-alerts/${incident.id}/reassign`, {
+              method: 'POST',
+              headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ volunteerId: v.id }),
+            });
+            const data = await resp.json();
+            if (!resp.ok) throw new Error(data?.error || 'Failed to assign');
+            Alert.alert('Assigned', 'Volunteer assigned to SOS case.');
+            loadIncidents();
+          } catch (e) {
+            Alert.alert('Error', e.message || 'Failed to assign');
+          }
+        },
+      }));
+
+      buttons.push({ text: 'Cancel', style: 'cancel' });
+      Alert.alert('Assign Volunteer', 'Choose an available volunteer:', buttons);
+    } catch (e) {
+      Alert.alert('Error', e.message || 'Failed to load volunteers');
     }
   };
 
@@ -381,7 +499,7 @@ const IncidentManagementScreen = ({ navigation }) => {
 
               {/* Quick Actions */}
               <View style={styles.quickActions}>
-                <TouchableOpacity style={styles.quickAction}>
+                <TouchableOpacity style={styles.quickAction} onPress={() => assignVolunteer(incident)}>
                   <MaterialCommunityIcons
                     name="account-plus"
                     size={18}
@@ -391,7 +509,7 @@ const IncidentManagementScreen = ({ navigation }) => {
                     Assign
                   </Text>
                 </TouchableOpacity>
-                <TouchableOpacity style={styles.quickAction}>
+                <TouchableOpacity style={styles.quickAction} onPress={() => callSenior(incident)}>
                   <MaterialCommunityIcons
                     name="phone"
                     size={18}
@@ -401,7 +519,7 @@ const IncidentManagementScreen = ({ navigation }) => {
                     Call Senior
                   </Text>
                 </TouchableOpacity>
-                <TouchableOpacity style={styles.quickAction}>
+                <TouchableOpacity style={styles.quickAction} onPress={() => escalateIncident(incident)}>
                   <MaterialCommunityIcons
                     name="arrow-up-circle"
                     size={18}

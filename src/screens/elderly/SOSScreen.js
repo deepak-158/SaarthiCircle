@@ -18,7 +18,6 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LargeButton } from '../../components/common';
 import { colors, typography, spacing, borderRadius, shadows } from '../../theme';
 import { getTranslation } from '../../i18n/translations';
-import { createSOSAlert } from '../../config/firebase';
 import { BACKEND_URL as API_BASE } from '../../config/backend';
 
 const SOSScreen = ({ navigation }) => {
@@ -76,34 +75,50 @@ const SOSScreen = ({ navigation }) => {
     }
   };
 
-  const sendSOSAlert = async () => {
-    try {
-      // Create SOS alert in Firebase
-      const alertData = {
-        seniorName: userProfile?.fullName || userProfile?.name || 'Senior',
-        seniorPhone: userProfile?.phone || 'Unknown',
-        message: 'Emergency SOS triggered',
-        timestamp: new Date().toISOString(),
-      };
-      
-      await createSOSAlert(userProfile?.phone || 'unknown', alertData);
-      console.log('SOS Alert sent to Firebase');
-    } catch (error) {
-      console.error('Error sending SOS to Firebase:', error);
-    }
+  const getEmergencyPhones = () => {
+    const phones = (emergencyContacts || [])
+      .map((c) => String(c?.phone || '').trim())
+      .filter(Boolean);
+    // Always include emergency services as fallback
+    phones.push('112');
+    return Array.from(new Set(phones));
+  };
 
-    // Best-effort: also persist to backend Supabase so NGOs can see emergencies
+  const sendSmsFallback = async () => {
     try {
-      const token = await AsyncStorage.getItem('userToken');
-      if (token) {
-        await fetch(`${API_BASE}/sos-alerts`, {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: 'Emergency SOS triggered', type: 'panic' }),
-        });
+      if (Platform.OS === 'web') return;
+      const phones = getEmergencyPhones();
+      if (!phones.length) return;
+
+      const body = encodeURIComponent('SOS! I need help immediately. Please call me back.');
+      // Note: platform-specific sms url formats
+      const recipient = phones.join(',');
+      const url = Platform.OS === 'ios' ? `sms:${recipient}&body=${body}` : `sms:${recipient}?body=${body}`;
+
+      const canOpen = await Linking.canOpenURL(url);
+      if (canOpen) {
+        await Linking.openURL(url);
       }
     } catch {
       // ignore
+    }
+  };
+
+  const sendSOSAlert = async () => {
+    try {
+      const token = await AsyncStorage.getItem('userToken');
+      if (!token) return { ok: false };
+
+      const phones = getEmergencyPhones();
+      const resp = await fetch(`${API_BASE}/sos-alerts`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: 'Emergency SOS triggered', type: 'panic', emergencyPhones: phones }),
+      });
+      if (!resp.ok) return { ok: false };
+      return { ok: true };
+    } catch {
+      return { ok: false };
     }
   };
 
@@ -133,7 +148,9 @@ const SOSScreen = ({ navigation }) => {
     if (isActivated && countdown > 0) {
       const timer = setInterval(() => {
         setCountdown((prev) => prev - 1);
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+        if (Platform.OS !== 'web') {
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {});
+        }
         Vibration.vibrate(500);
       }, 1000);
 
@@ -141,10 +158,23 @@ const SOSScreen = ({ navigation }) => {
     } else if (isActivated && countdown === 0) {
       // Send SOS
       setIsSent(true);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+      if (Platform.OS !== 'web') {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
+      }
       
       // Actually send the SOS alert
-      sendSOSAlert();
+      (async () => {
+        const result = await sendSOSAlert();
+        if (!result?.ok) {
+          // No internet / backend failed: fallback channels still work
+          try {
+            await callEmergencyContact();
+          } catch {}
+          try {
+            await sendSmsFallback();
+          } catch {}
+        }
+      })();
       
       // Try to call emergency contact
       setTimeout(() => {
@@ -165,7 +195,9 @@ const SOSScreen = ({ navigation }) => {
   }, [isActivated, countdown]);
 
   const handleSOSPress = () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+    if (Platform.OS !== 'web') {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {});
+    }
     setIsActivated(true);
   };
 
