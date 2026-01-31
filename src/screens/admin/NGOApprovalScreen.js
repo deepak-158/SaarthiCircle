@@ -128,6 +128,9 @@ const NGOApprovalScreen = ({ navigation }) => {
       });
       const data = await resp.json();
       if (!resp.ok) throw new Error(data.error || 'Verify failed');
+      if (data?.queuedForSuperAdmin) {
+        Alert.alert('Submitted', 'Queued for SuperAdmin approval.');
+      }
       await loadNgos();
     } catch (e) {
       Alert.alert('Error', e.message || 'Verify failed');
@@ -147,6 +150,9 @@ const NGOApprovalScreen = ({ navigation }) => {
       });
       const data = await resp.json();
       if (!resp.ok) throw new Error(data.error || 'Access update failed');
+      if (data?.queuedForSuperAdmin) {
+        Alert.alert('Submitted', 'Queued for SuperAdmin approval.');
+      }
       await loadNgos();
     } catch (e) {
       Alert.alert('Error', e.message || 'Access update failed');
@@ -177,6 +183,9 @@ const NGOApprovalScreen = ({ navigation }) => {
       });
       const data = await resp.json();
       if (!resp.ok) throw new Error(data.error || 'Assign failed');
+      if (data?.queuedForSuperAdmin) {
+        Alert.alert('Submitted', 'Queued for SuperAdmin approval.');
+      }
       setAssignModal({ open: false, ngo: null, regions: '', serviceTypes: '' });
       await loadNgos();
     } catch (e) {
@@ -196,6 +205,9 @@ const NGOApprovalScreen = ({ navigation }) => {
       });
       const data = await resp.json();
       if (!resp.ok) throw new Error(data.error || 'Approve failed');
+      if (data?.queuedForSuperAdmin) {
+        Alert.alert('Submitted', 'Queued for SuperAdmin approval.');
+      }
       await loadNgos();
     } catch (e) {
       Alert.alert('Error', e.message || 'Approve failed');
@@ -222,6 +234,9 @@ const NGOApprovalScreen = ({ navigation }) => {
       });
       const data = await resp.json();
       if (!resp.ok) throw new Error(data.error || 'Reject failed');
+      if (data?.queuedForSuperAdmin) {
+        Alert.alert('Submitted', 'Queued for SuperAdmin approval.');
+      }
       setRejectModal({ open: false, ngo: null, reason: '' });
       await loadNgos();
     } catch (e) {

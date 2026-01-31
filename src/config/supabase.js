@@ -51,6 +51,7 @@ export const USER_ROLES = {
   VOLUNTEER: 'volunteer',
   ADMIN: 'admin',
   NGO: 'ngo',
+  SUPERADMIN: 'superadmin',
 };
 
 // Help request types

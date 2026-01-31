@@ -58,7 +58,9 @@ const SplashScreen = ({ navigation }) => {
             });
           } else {
             // Navigate based on role
-            if (userRole === 'admin') {
+            if (userRole === 'superadmin') {
+              navigation.replace('SuperAdminApp');
+            } else if (userRole === 'admin') {
               navigation.replace('AdminApp');
             } else if (userRole === 'volunteer' || userRole === 'caregiver') {
               navigation.replace('CaregiverApp');

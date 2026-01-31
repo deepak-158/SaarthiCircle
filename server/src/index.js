@@ -52,6 +52,13 @@ const pendingRequests = new Map(); // seniorId -> { status: 'pending'|'claimed',
 // In-memory OTP store: email -> { code, expiresAt }
 const otpStore = new Map();
 
+const normalizePhone = (phone) => {
+  if (!phone) return null;
+  const raw = String(phone).trim();
+  if (!raw) return null;
+  return raw.replace(/\s+/g, '');
+};
+
 const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST,
   port: Number(process.env.SMTP_PORT || 587),
@@ -272,8 +279,394 @@ const ensureAuth = async (req, res, next) => {
   }
 };
 
+const ensureSuperAdmin = async (req, res, next) => {
+  await ensureAuth(req, res, () => {
+    if (req.user?.role !== 'superadmin') {
+      return res.status(403).json({ error: 'SuperAdmin role required' });
+    }
+    next();
+  });
+};
+
+const createAuditLog = async (actorId, action, targetType, targetId, details) => {
+  try {
+    const { error } = await supabase.from(TABLES.AUDIT_LOGS).insert({
+      actor_id: actorId,
+      action,
+      target_type: targetType,
+      target_id: targetId,
+      details: typeof details === 'object' ? JSON.stringify(details) : details,
+      created_at: new Date().toISOString(),
+    });
+    if (error) console.error(`[AUDIT] Failed to create log:`, error);
+  } catch (e) {
+    console.error(`[AUDIT] Exception:`, e);
+  }
+};
+
 // HTTP endpoints
 app.get('/health', (_req, res) => res.json({ ok: true }));
+
+app.get('/superadmin/health', ensureSuperAdmin, async (_req, res) => {
+  res.json({ ok: true, role: 'superadmin' });
+});
+
+app.get('/superadmin/admins', ensureSuperAdmin, async (req, res) => {
+  try {
+    const { q = '', limit = 200 } = req.query || {};
+    const qNorm = String(q || '').trim().toLowerCase();
+    const lim = Math.min(500, Math.max(1, Number(limit) || 200));
+
+    const { data, error } = await supabase
+      .from(TABLES.USERS)
+      .select('*')
+      .eq('role', 'admin')
+      .order('updated_at', { ascending: false })
+      .limit(lim);
+    if (error) throw error;
+
+    let admins = (data || []).map(parseProfileData).map((u) => ({
+      id: u.id,
+      name: u.name || u.full_name || 'Admin',
+      email: u.email,
+      phone: u.phone,
+      status: (u.is_blocked === true || u.blocked === true) ? 'disabled' : 'enabled',
+      raw: u,
+    }));
+
+    if (qNorm) {
+      admins = admins.filter((a) => {
+        const hay = `${a.name || ''} ${a.email || ''} ${a.phone || ''}`.toLowerCase();
+        return hay.includes(qNorm) || String(a.id).toLowerCase().includes(qNorm);
+      });
+    }
+
+    res.json({ admins });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/superadmin/admins', ensureSuperAdmin, async (req, res) => {
+  try {
+    const { email, phone, name } = req.body || {};
+    const emailNorm = String(email || '').trim().toLowerCase();
+    const phoneNorm = normalizePhone(phone);
+    if (!emailNorm || !phoneNorm) return res.status(400).json({ error: 'email and phone required' });
+
+    const { data: existing } = await supabase.from(TABLES.USERS).select('*').eq('email', emailNorm).maybeSingle();
+    const id = existing?.id || randomUUID();
+    const now = new Date().toISOString();
+
+    await supabase.from(TABLES.USERS).upsert({
+      id,
+      email: emailNorm,
+      phone: phoneNorm,
+      name: name || existing?.name || null,
+      role: 'admin',
+      updated_at: now,
+    }, { onConflict: 'id' });
+
+    const updated = await writeUserMetadata(id, { is_approved: true, role: 'admin', admin_created_at: now });
+    await createAuditLog(req.user.id, 'admin_create_or_promote', 'user', id, { email: emailNorm, phone: phoneNorm });
+    emitAdminUpdate({ type: 'admin', action: 'created', admin: updated });
+    res.json({ admin: updated });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/superadmin/admins/:id/deactivate', ensureSuperAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { deactivated = true } = req.body || {};
+    const now = new Date().toISOString();
+    const updated = await writeUserMetadata(id, { is_blocked: !!deactivated, blocked: !!deactivated, blocked_at: !!deactivated ? now : null });
+    await createAuditLog(req.user.id, deactivated ? 'admin_deactivate' : 'admin_activate', 'user', id, { deactivated: !!deactivated });
+    emitAdminUpdate({ type: 'admin', action: deactivated ? 'deactivated' : 'activated', admin: updated });
+    res.json({ admin: updated });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/superadmin/ngos', ensureSuperAdmin, async (req, res) => {
+  try {
+    const { limit = 500 } = req.query || {};
+    const lim = Math.min(500, Math.max(1, Number(limit) || 200));
+    const { data, error } = await supabase
+      .from(TABLES.USERS)
+      .select('*')
+      .in('role', ['ngo', 'ngo_pending', 'ngo_rejected'])
+      .order('updated_at', { ascending: false })
+      .limit(lim);
+    if (error) throw error;
+
+    const ngos = (data || []).map(parseProfileData).map((u) => {
+      const normalizedRole = String(u.role || '').toLowerCase();
+      const applicationStatus = normalizedRole === 'ngo_pending'
+        ? 'pending'
+        : (normalizedRole === 'ngo_rejected' || u.ngo_rejected === true)
+          ? 'rejected'
+          : 'approved';
+      return {
+        id: u.id,
+        name: u.name || u.full_name || 'NGO',
+        email: u.email,
+        phone: u.phone,
+        applicationStatus,
+        verified: u.is_verified === true || u.verified === true,
+        status: (u.is_blocked === true || u.blocked === true) ? 'disabled' : 'enabled',
+        regions: u.ngo_regions || u.regions || [],
+        serviceTypes: u.ngo_service_types || u.service_types || [],
+        superadminRequest: u.superadmin_request || null,
+        raw: u,
+      };
+    });
+
+    res.json({ ngos });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/superadmin/ngos/requests', ensureSuperAdmin, async (req, res) => {
+  try {
+    const { limit = 500 } = req.query || {};
+    const lim = Math.min(500, Math.max(1, Number(limit) || 200));
+    const { data, error } = await supabase
+      .from(TABLES.USERS)
+      .select('*')
+      .in('role', ['ngo', 'ngo_pending', 'ngo_rejected'])
+      .order('updated_at', { ascending: false })
+      .limit(lim);
+    if (error) throw error;
+
+    const requests = (data || [])
+      .map(parseProfileData)
+      .filter((u) => !!u.superadmin_request)
+      .map((u) => ({
+        id: u.id,
+        name: u.name || u.full_name || 'NGO',
+        email: u.email,
+        phone: u.phone,
+        role: u.role,
+        request: u.superadmin_request,
+        raw: u,
+      }));
+
+    res.json({ requests });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/superadmin/ngos/:id/requests/decide', ensureSuperAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { decision = 'approve' } = req.body || {};
+    const now = new Date().toISOString();
+
+    const { data, error } = await supabase.from(TABLES.USERS).select('*').eq('id', id).single();
+    if (error) throw error;
+    const u = parseProfileData(data);
+    const request = u.superadmin_request;
+    if (!request) return res.status(400).json({ error: 'No pending request for this NGO' });
+
+    const type = String(request.type || '').trim();
+    const dec = String(decision || 'approve').toLowerCase();
+    if (dec !== 'approve' && dec !== 'reject') return res.status(400).json({ error: 'decision must be approve or reject' });
+
+    if (dec === 'reject') {
+      const cleared = await writeUserMetadata(id, { superadmin_request: null, superadmin_decided_at: now, superadmin_decision: 'rejected' });
+      await createAuditLog(req.user.id, 'ngo_request_rejected', 'ngo', id, { type, request });
+      emitAdminUpdate({ type: 'ngo', action: 'superadmin_request_rejected', ngo: cleared });
+      emitNgoUpdate({ ngoId: id, type: 'ngo', action: 'superadmin_request_rejected', ngo: cleared });
+      return res.json({ ngo: cleared });
+    }
+
+    let updated = null;
+    if (type === 'ngo_approve') {
+      try {
+        await supabase.from(TABLES.USERS).update({ role: 'ngo', updated_at: now }).eq('id', id);
+      } catch {}
+      updated = await writeUserMetadata(id, {
+        is_approved: true,
+        is_verified: true,
+        verified: true,
+        verified_at: now,
+        ngo_rejected: false,
+        ngo_rejected_reason: null,
+        ngo_rejected_at: null,
+        superadmin_request: null,
+        superadmin_decided_at: now,
+        superadmin_decision: 'approved',
+      });
+      try {
+        await supabase.from(TABLES.NGOS).upsert({ user_id: id, status: 'approved', updated_at: now }, { onConflict: 'user_id' });
+      } catch {}
+      try {
+        await supabase.from(TABLES.PENDING_APPROVALS).update({ status: 'approved', decided_at: now }).eq('uid', id);
+      } catch {}
+      await createAuditLog(req.user.id, 'ngo_approved', 'ngo', id, { request });
+    } else if (type === 'ngo_reject') {
+      const reason = String(request?.payload?.reason || request?.reason || '');
+      try {
+        await supabase.from(TABLES.USERS).update({ role: 'ngo_rejected', updated_at: now }).eq('id', id);
+      } catch {}
+      updated = await writeUserMetadata(id, {
+        is_approved: false,
+        is_verified: false,
+        verified: false,
+        ngo_rejected: true,
+        ngo_rejected_reason: reason,
+        ngo_rejected_at: now,
+        superadmin_request: null,
+        superadmin_decided_at: now,
+        superadmin_decision: 'approved',
+      });
+      try {
+        await supabase.from(TABLES.NGOS).upsert({ user_id: id, status: 'rejected', updated_at: now }, { onConflict: 'user_id' });
+      } catch {}
+      try {
+        await supabase.from(TABLES.PENDING_APPROVALS).update({ status: 'rejected', decided_at: now }).eq('uid', id);
+      } catch {}
+      await createAuditLog(req.user.id, 'ngo_rejected', 'ngo', id, { reason, request });
+    } else if (type === 'ngo_assign') {
+      const regions = Array.isArray(request?.payload?.regions) ? request.payload.regions : [];
+      const serviceTypes = Array.isArray(request?.payload?.serviceTypes) ? request.payload.serviceTypes : [];
+      updated = await writeUserMetadata(id, {
+        ngo_regions: regions,
+        ngo_service_types: serviceTypes,
+        ngo_assigned_at: now,
+        superadmin_request: null,
+        superadmin_decided_at: now,
+        superadmin_decision: 'approved',
+      });
+      await createAuditLog(req.user.id, 'ngo_assigned_scope', 'ngo', id, { regions, serviceTypes, request });
+    } else if (type === 'ngo_access') {
+      const enabled = request?.payload?.enabled === true;
+      updated = await writeUserMetadata(id, {
+        is_blocked: !enabled,
+        blocked: !enabled,
+        blocked_at: !enabled ? now : null,
+        superadmin_request: null,
+        superadmin_decided_at: now,
+        superadmin_decision: 'approved',
+      });
+      await createAuditLog(req.user.id, enabled ? 'ngo_enabled' : 'ngo_suspended', 'ngo', id, { enabled, request });
+    } else if (type === 'ngo_verify') {
+      const verified = request?.payload?.verified === true;
+      updated = await writeUserMetadata(id, {
+        is_verified: verified,
+        verified,
+        verified_at: verified ? now : null,
+        superadmin_request: null,
+        superadmin_decided_at: now,
+        superadmin_decision: 'approved',
+      });
+      await createAuditLog(req.user.id, verified ? 'ngo_verified' : 'ngo_unverified', 'ngo', id, { verified, request });
+    } else if (type === 'ngo_profile_update_approve') {
+      const reqPatch = request?.payload && typeof request.payload === 'object' ? request.payload : {};
+      const nextPhone = reqPatch.phone !== undefined ? String(reqPatch.phone || '') : undefined;
+      const nextEmail = reqPatch.email !== undefined ? String(reqPatch.email || '') : undefined;
+      const nextContact = reqPatch.contactPerson !== undefined ? String(reqPatch.contactPerson || '') : undefined;
+
+      try {
+        const updateUser = {};
+        if (nextPhone !== undefined) updateUser.phone = nextPhone || null;
+        if (nextEmail !== undefined) updateUser.email = nextEmail || null;
+        if (Object.keys(updateUser).length) {
+          updateUser.updated_at = now;
+          await supabase.from(TABLES.USERS).update(updateUser).eq('id', id);
+        }
+      } catch {}
+
+      try {
+        const updateNgo = { updated_at: now };
+        if (nextPhone !== undefined) updateNgo.phone = nextPhone || null;
+        if (nextEmail !== undefined) updateNgo.email = nextEmail || null;
+        if (nextContact !== undefined) updateNgo.contact_person = nextContact || null;
+        await supabase.from(TABLES.NGOS).upsert({ user_id: id, ...updateNgo }, { onConflict: 'user_id' });
+      } catch {}
+
+      updated = await writeUserMetadata(id, {
+        ...(nextContact !== undefined ? { contact_person: nextContact || null, contactPerson: nextContact || null } : {}),
+        ngo_profile_update_status: 'approved',
+        ngo_profile_update_decided_at: now,
+        ngo_profile_update_reject_reason: null,
+        superadmin_request: null,
+        superadmin_decided_at: now,
+        superadmin_decision: 'approved',
+      });
+      try {
+        await supabase.from(TABLES.PENDING_APPROVALS).update({ status: 'approved', decided_at: now }).eq('uid', id);
+      } catch {}
+      try {
+        await logNgoActivity({ ngoId: id, action: 'profile_update_approved', entityType: 'ngo', entityId: id, details: reqPatch });
+      } catch {}
+      await createAuditLog(req.user.id, 'ngo_profile_update_approved', 'ngo', id, { request });
+    } else if (type === 'ngo_profile_update_reject') {
+      const reason = String(request?.payload?.reason || request?.reason || '');
+      updated = await writeUserMetadata(id, {
+        ngo_profile_update_status: 'rejected',
+        ngo_profile_update_decided_at: now,
+        ngo_profile_update_reject_reason: reason,
+        superadmin_request: null,
+        superadmin_decided_at: now,
+        superadmin_decision: 'approved',
+      });
+      try {
+        await supabase.from(TABLES.PENDING_APPROVALS).update({ status: 'rejected', decided_at: now }).eq('uid', id);
+      } catch {}
+      try {
+        await logNgoActivity({ ngoId: id, action: 'profile_update_rejected', entityType: 'ngo', entityId: id, details: { reason } });
+      } catch {}
+      await createAuditLog(req.user.id, 'ngo_profile_update_rejected', 'ngo', id, { reason, request });
+    } else {
+      return res.status(400).json({ error: `Unknown request type: ${type}` });
+    }
+
+    if (!updated) {
+      updated = await writeUserMetadata(id, { superadmin_request: null, superadmin_decided_at: now, superadmin_decision: 'approved' });
+    }
+    emitAdminUpdate({ type: 'ngo', action: 'superadmin_request_approved', ngo: updated });
+    emitNgoUpdate({ ngoId: id, type: 'ngo', action: 'superadmin_request_approved', ngo: updated });
+    res.json({ ngo: updated });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/superadmin/escalations', ensureSuperAdmin, async (req, res) => {
+  try {
+    const { limit = 200 } = req.query || {};
+    const lim = Math.min(500, Math.max(1, Number(limit) || 200));
+    const [helpRes, sosRes] = await Promise.all([
+      supabase.from(TABLES.HELP_REQUESTS).select('*').eq('status', 'escalated').order('created_at', { ascending: false }).limit(lim),
+      supabase.from(TABLES.SOS_ALERTS).select('*').eq('status', 'active').order('created_at', { ascending: false }).limit(lim),
+    ]);
+    res.json({ helpRequests: helpRes?.data || [], sosAlerts: sosRes?.data || [] });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/superadmin/audit-logs', ensureSuperAdmin, async (req, res) => {
+  try {
+    const { limit = 200 } = req.query || {};
+    const lim = Math.min(500, Math.max(1, Number(limit) || 200));
+    const { data, error } = await supabase
+      .from(TABLES.AUDIT_LOGS)
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(lim);
+    if (error) throw error;
+    res.json({ logs: data || [] });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 
 app.post('/auth/register-push-token', ensureAuth, async (req, res) => {
   const { token } = req.body;
@@ -1130,17 +1523,22 @@ const parseProfileData = (user) => {
 app.post('/auth/send-otp', async (req, res) => {
   // Global middleware already logs the body
   try {
-    const { email, name } = req.body || {};
+    const { email, name, phone } = req.body || {};
     if (!email) {
       console.warn(`[WARN] /send-otp called without email`);
       return res.status(400).json({ error: 'email required' });
+    }
+    const phoneNorm = normalizePhone(phone);
+    if (!phoneNorm) {
+      console.warn(`[WARN] /send-otp called without phone`);
+      return res.status(400).json({ error: 'phone required' });
     }
     const emailNorm = String(email).trim().toLowerCase();
     const code = Math.floor(100000 + Math.random() * 900000).toString();
     const expiresAt = Date.now() + 10 * 60 * 1000; // 10 minutes
     
     console.log(`[INFO] Generated OTP ${code} for ${emailNorm}`);
-    otpStore.set(emailNorm, { code, expiresAt });
+    otpStore.set(emailNorm, { code, expiresAt, phone: phoneNorm });
     // Dev aid: log OTP so you can verify quickly during development
     if ((process.env.NODE_ENV || 'development') !== 'production') {
       console.log(`[DEV] OTP for ${emailNorm}: ${code} (expires in 10m)`);
@@ -1149,13 +1547,34 @@ app.post('/auth/send-otp', async (req, res) => {
     let persisted = false;
     try {
       console.log(`[DB] Attempting to persist OTP for ${emailNorm}...`);
-      const { data, error: otpErr } = await supabase
+      // Best-effort: some deployments might have a phone column. Try with phone, fallback without.
+      let data = null;
+      let otpErr = null;
+      const first = await supabase
         .from(TABLES.OTP_CODES)
         .upsert(
-          { email: emailNorm, code, expires_at: new Date(expiresAt).toISOString() },
+          { email: emailNorm, phone: phoneNorm, code, expires_at: new Date(expiresAt).toISOString() },
           { onConflict: 'email' }
         )
         .select();
+      if (!first.error) {
+        data = first.data;
+      } else {
+        otpErr = first.error;
+        const fallback = await supabase
+          .from(TABLES.OTP_CODES)
+          .upsert(
+            { email: emailNorm, code, expires_at: new Date(expiresAt).toISOString() },
+            { onConflict: 'email' }
+          )
+          .select();
+        if (!fallback.error) {
+          data = fallback.data;
+          otpErr = null;
+        } else {
+          otpErr = fallback.error;
+        }
+      }
       
       if (otpErr) {
         console.warn(`[WARN] Failed to persist OTP for ${emailNorm}: ${otpErr.message} (${otpErr.code || 'no_code'})`);
@@ -1192,7 +1611,8 @@ app.post('/auth/verify-otp', async (req, res) => {
   console.log(`[AUTH] /verify-otp request received:`, req.body);
   try {
     const { email, token, gender, name, role, phone } = req.body || {};
-    if (!email || !token) return res.status(400).json({ error: 'email and token required' });
+    const phoneNorm = normalizePhone(phone);
+    if (!email || !token || !phoneNorm) return res.status(400).json({ error: 'email, phone and token required' });
     const emailNorm = String(email).trim().toLowerCase();
     const tok = String(token).trim();
     console.log(`[INFO] /auth/verify-otp requested for ${emailNorm}`);
@@ -1216,6 +1636,7 @@ app.post('/auth/verify-otp', async (req, res) => {
         rec = {
           code: otpRow.code,
           expiresAt: otpRow.expires_at ? new Date(otpRow.expires_at).getTime() : 0,
+          phone: otpRow.phone ? normalizePhone(otpRow.phone) : null,
           fromDb: true,
         };
       } else {
@@ -1249,6 +1670,7 @@ app.post('/auth/verify-otp', async (req, res) => {
     }
     if (rec.expiresAt < Date.now()) return res.status(401).json({ error: 'OTP expired' });
     if (String(rec.code) !== tok) return res.status(401).json({ error: 'Invalid OTP' });
+    if (rec.phone && normalizePhone(rec.phone) !== phoneNorm) return res.status(401).json({ error: 'Phone mismatch' });
 
     // Consume OTP after a short delay (prevents double-tap issues)
     console.log(`[INFO] Scheduling OTP deletion for ${emailNorm} in 30s`);
@@ -1269,16 +1691,47 @@ app.post('/auth/verify-otp', async (req, res) => {
       .eq('email', emailNorm)
       .single();
 
+    const existingParsed = existing ? parseProfileData(existing) : null;
+    if (existing) {
+      const existingRole = String(existingParsed?.role || existing?.role || '').toLowerCase();
+      if (existingRole === 'superadmin') {
+        const phones = [];
+        if (existing.phone) phones.push(existing.phone);
+        if (existingParsed?.phone) phones.push(existingParsed.phone);
+        if (existingParsed?.secondary_phone) phones.push(existingParsed.secondary_phone);
+        if (existingParsed?.secondaryPhone) phones.push(existingParsed.secondaryPhone);
+        if (Array.isArray(existingParsed?.superadmin_phones)) phones.push(...existingParsed.superadmin_phones);
+        if (Array.isArray(existingParsed?.superadminPhones)) phones.push(...existingParsed.superadminPhones);
+        const allowed = new Set(phones.map((p) => normalizePhone(p)).filter(Boolean));
+        if (allowed.size && !allowed.has(phoneNorm)) {
+          return res.status(403).json({ error: 'Email and phone do not match this account' });
+        }
+      } else if (existing?.phone && normalizePhone(existing.phone) !== phoneNorm) {
+        return res.status(403).json({ error: 'Email and phone do not match this account' });
+      }
+    }
+
     let isNew = false;
     const id = existing?.id || randomUUID();
     if (!existing && (findErr?.code === 'PGRST116' || !findErr)) {
+      // Prevent signup with superadmin role if not already in DB
+      if (role === 'superadmin') {
+        console.warn(`[AUTH] Blocked attempt to signup as superadmin: ${emailNorm}`);
+        return res.status(403).json({ error: 'SuperAdmin account must be pre-created.' });
+      }
       isNew = true;
+    }
+
+    // Also prevent existing users from switching to superadmin role via login
+    if (existing && existing.role !== 'superadmin' && role === 'superadmin') {
+        console.warn(`[AUTH] Blocked attempt to switch to superadmin role: ${emailNorm}`);
+        return res.status(403).json({ error: 'Unauthorized role assignment.' });
     }
 
     const profile = {
       id,
       email: emailNorm,
-      phone: phone ?? existing?.phone ?? null,
+      phone: phoneNorm ?? existing?.phone ?? null,
       name: name ?? existing?.name ?? null,
       role: role ?? existing?.role ?? null,
       gender: gender ?? existing?.gender ?? null,
@@ -1287,9 +1740,8 @@ app.post('/auth/verify-otp', async (req, res) => {
     // Determine approved status
     // IMPORTANT: Some deployments store approval only in metadata (avatar_emoji JSON).
     // Using existing?.is_approved can incorrectly reset approved volunteers to false.
-    const existingParsed = existing ? parseProfileData(existing) : null;
     const existingApproved = existingParsed?.is_approved === true;
-    const isApproved = role === 'admin' || role === 'elderly' ? true : existingApproved;
+    const isApproved = role === 'admin' || role === 'superadmin' || role === 'elderly' ? true : existingApproved;
     
     // Preserve existing avatar_emoji if it contains JSON metadata
     const currentAvatar = existing?.avatar_emoji;
@@ -1807,52 +2259,24 @@ app.post('/admin/ngos/:id/profile-update/approve', ensureAdmin, async (req, res)
       ? u.ngo_profile_update_request
       : {};
 
-    const nextPhone = reqPatch.phone !== undefined ? String(reqPatch.phone || '') : undefined;
-    const nextEmail = reqPatch.email !== undefined ? String(reqPatch.email || '') : undefined;
-    const nextContact = reqPatch.contactPerson !== undefined ? String(reqPatch.contactPerson || '') : undefined;
-
-    // Update base users table for canonical phone/email
-    try {
-      const updateUser = {};
-      if (nextPhone !== undefined) updateUser.phone = nextPhone || null;
-      if (nextEmail !== undefined) updateUser.email = nextEmail || null;
-      if (Object.keys(updateUser).length) {
-        updateUser.updated_at = now;
-        await supabase.from(TABLES.USERS).update(updateUser).eq('id', id);
-      }
-    } catch {}
-
-    // Update NGOs table best-effort
-    try {
-      const updateNgo = { updated_at: now };
-      if (nextPhone !== undefined) updateNgo.phone = nextPhone || null;
-      if (nextEmail !== undefined) updateNgo.email = nextEmail || null;
-      if (nextContact !== undefined) updateNgo.contact_person = nextContact || null;
-      await supabase.from(TABLES.NGOS).upsert({ user_id: id, ...updateNgo }, { onConflict: 'user_id' });
-    } catch {}
-
-    // Persist metadata changes and mark approved
     const updated = await writeUserMetadata(id, {
-      ...(nextContact !== undefined ? { contact_person: nextContact || null, contactPerson: nextContact || null } : {}),
-      ngo_profile_update_status: 'approved',
-      ngo_profile_update_decided_at: now,
-      ngo_profile_update_reject_reason: null,
+      superadmin_request: {
+        type: 'ngo_profile_update_approve',
+        requested_by: req.user.id,
+        requested_at: now,
+        payload: reqPatch,
+      },
+      ngo_profile_update_status: 'pending_superadmin',
+      ngo_profile_update_requested_at: now,
     });
 
-    // pending_approvals best-effort
     try {
-      await supabase
-        .from(TABLES.PENDING_APPROVALS)
-        .update({ status: 'approved', decided_at: now })
-        .eq('uid', id);
+      await createAuditLog(req.user.id, 'ngo_profile_update_approve_requested', 'ngo', id, { requested_at: now });
     } catch {}
 
-    emitAdminUpdate({ type: 'ngo', action: 'profile_update_approved', ngo: updated });
-    emitNgoUpdate({ ngoId: id, type: 'ngo', action: 'profile_update_approved', ngo: updated });
-    try {
-      await logNgoActivity({ ngoId: id, action: 'profile_update_approved', entityType: 'ngo', entityId: id, details: reqPatch });
-    } catch {}
-    res.json({ ngo: updated });
+    emitAdminUpdate({ type: 'ngo', action: 'profile_update_requested', ngo: updated });
+    emitNgoUpdate({ ngoId: id, type: 'ngo', action: 'profile_update_requested', ngo: updated });
+    res.json({ ngo: updated, queuedForSuperAdmin: true });
   } catch (e) {
     console.error('[ERROR] Failed to approve NGO profile update:', e);
     res.status(500).json({ error: e.message });
@@ -1866,24 +2290,23 @@ app.post('/admin/ngos/:id/profile-update/reject', ensureAdmin, async (req, res) 
     const now = new Date().toISOString();
 
     const updated = await writeUserMetadata(id, {
-      ngo_profile_update_status: 'rejected',
-      ngo_profile_update_decided_at: now,
-      ngo_profile_update_reject_reason: String(reason || ''),
+      superadmin_request: {
+        type: 'ngo_profile_update_reject',
+        requested_by: req.user.id,
+        requested_at: now,
+        payload: { reason: String(reason || '') },
+      },
+      ngo_profile_update_status: 'pending_superadmin',
+      ngo_profile_update_requested_at: now,
     });
 
     try {
-      await supabase
-        .from(TABLES.PENDING_APPROVALS)
-        .update({ status: 'rejected', decided_at: now })
-        .eq('uid', id);
+      await createAuditLog(req.user.id, 'ngo_profile_update_reject_requested', 'ngo', id, { reason: String(reason || ''), requested_at: now });
     } catch {}
 
-    emitAdminUpdate({ type: 'ngo', action: 'profile_update_rejected', ngo: updated });
-    emitNgoUpdate({ ngoId: id, type: 'ngo', action: 'profile_update_rejected', ngo: updated });
-    try {
-      await logNgoActivity({ ngoId: id, action: 'profile_update_rejected', entityType: 'ngo', entityId: id, details: { reason } });
-    } catch {}
-    res.json({ ngo: updated });
+    emitAdminUpdate({ type: 'ngo', action: 'profile_update_reject_requested', ngo: updated });
+    emitNgoUpdate({ ngoId: id, type: 'ngo', action: 'profile_update_reject_requested', ngo: updated });
+    res.json({ ngo: updated, queuedForSuperAdmin: true });
   } catch (e) {
     console.error('[ERROR] Failed to reject NGO profile update:', e);
     res.status(500).json({ error: e.message });
@@ -3946,9 +4369,19 @@ app.post('/admin/ngos/:id/verify', ensureAdmin, async (req, res) => {
     const { id } = req.params;
     const { verified = true } = req.body || {};
     const now = new Date().toISOString();
-    const updated = await writeUserMetadata(id, { is_verified: !!verified, verified: !!verified, verified_at: !!verified ? now : null });
-    emitAdminUpdate({ type: 'ngo', action: verified ? 'verified' : 'unverified', ngo: updated });
-    res.json({ ngo: updated });
+    const updated = await writeUserMetadata(id, {
+      superadmin_request: {
+        type: 'ngo_verify',
+        requested_by: req.user.id,
+        requested_at: now,
+        payload: { verified: !!verified },
+      },
+    });
+    try {
+      await createAuditLog(req.user.id, 'ngo_verify_requested', 'ngo', id, { verified: !!verified, requested_at: now });
+    } catch {}
+    emitAdminUpdate({ type: 'ngo', action: 'verify_requested', ngo: updated });
+    res.json({ ngo: updated, queuedForSuperAdmin: true });
   } catch (e) {
     console.error('[ERROR] Failed to verify NGO:', e);
     res.status(500).json({ error: e.message });
@@ -3960,53 +4393,21 @@ app.post('/admin/ngos/:id/approve', ensureAdmin, async (req, res) => {
     const { id } = req.params;
     const now = new Date().toISOString();
 
-    try {
-      const { error } = await supabase
-        .from(TABLES.USERS)
-        .update({ role: 'ngo', updated_at: now })
-        .eq('id', id);
-      if (error) throw error;
-    } catch (e) {
-      console.warn(`[WARN] Failed to update role=ngo for ${id}:`, e?.message || e);
-    }
-
     const updated = await writeUserMetadata(id, {
-      is_approved: true,
-      is_verified: true,
-      verified: true,
-      verified_at: now,
-      ngo_rejected: false,
-      ngo_rejected_reason: null,
-      ngo_rejected_at: null,
+      superadmin_request: {
+        type: 'ngo_approve',
+        requested_by: req.user.id,
+        requested_at: now,
+        payload: {},
+      },
     });
 
     try {
-      await supabase
-        .from(TABLES.NGOS)
-        .upsert({ user_id: id, status: 'approved', updated_at: now }, { onConflict: 'user_id' });
-    } catch (e) {
-      console.warn(`[WARN] Failed to update ngos status (approved) for ${id}:`, e?.message || e);
-    }
+      await createAuditLog(req.user.id, 'ngo_approve_requested', 'ngo', id, { requested_at: now });
+    } catch {}
 
-    // Persist decision in pending_approvals
-    try {
-      const upd = await supabase
-        .from(TABLES.PENDING_APPROVALS)
-        .update({ status: 'approved', decided_at: now })
-        .eq('uid', id)
-        .select();
-
-      if (upd?.error || !Array.isArray(upd?.data) || upd.data.length === 0) {
-        await supabase
-          .from(TABLES.PENDING_APPROVALS)
-          .insert({ uid: id, status: 'approved', decided_at: now, created_at: now });
-      }
-    } catch (e) {
-      console.warn(`[WARN] Failed to persist pending_approvals (approved) for ${id}:`, e?.message || e);
-    }
-
-    emitAdminUpdate({ type: 'ngo', action: 'approved', ngo: updated });
-    res.json({ ngo: updated });
+    emitAdminUpdate({ type: 'ngo', action: 'approval_requested', ngo: updated });
+    res.json({ ngo: updated, queuedForSuperAdmin: true });
   } catch (e) {
     console.error('[ERROR] Failed to approve NGO:', e);
     res.status(500).json({ error: e.message });
@@ -4019,52 +4420,21 @@ app.post('/admin/ngos/:id/reject', ensureAdmin, async (req, res) => {
     const { reason = '' } = req.body || {};
     const now = new Date().toISOString();
 
-    try {
-      const { error } = await supabase
-        .from(TABLES.USERS)
-        .update({ role: 'ngo_rejected', updated_at: now })
-        .eq('id', id);
-      if (error) throw error;
-    } catch (e) {
-      console.warn(`[WARN] Failed to update role=ngo_rejected for ${id}:`, e?.message || e);
-    }
-
     const updated = await writeUserMetadata(id, {
-      is_approved: false,
-      is_verified: false,
-      verified: false,
-      ngo_rejected: true,
-      ngo_rejected_reason: String(reason || ''),
-      ngo_rejected_at: now,
+      superadmin_request: {
+        type: 'ngo_reject',
+        requested_by: req.user.id,
+        requested_at: now,
+        payload: { reason: String(reason || '') },
+      },
     });
 
     try {
-      await supabase
-        .from(TABLES.NGOS)
-        .upsert({ user_id: id, status: 'rejected', updated_at: now }, { onConflict: 'user_id' });
-    } catch (e) {
-      console.warn(`[WARN] Failed to update ngos status (rejected) for ${id}:`, e?.message || e);
-    }
+      await createAuditLog(req.user.id, 'ngo_reject_requested', 'ngo', id, { reason: String(reason || ''), requested_at: now });
+    } catch {}
 
-    // Persist decision in pending_approvals
-    try {
-      const upd = await supabase
-        .from(TABLES.PENDING_APPROVALS)
-        .update({ status: 'rejected', decided_at: now })
-        .eq('uid', id)
-        .select();
-
-      if (upd?.error || !Array.isArray(upd?.data) || upd.data.length === 0) {
-        await supabase
-          .from(TABLES.PENDING_APPROVALS)
-          .insert({ uid: id, status: 'rejected', decided_at: now, created_at: now });
-      }
-    } catch (e) {
-      console.warn(`[WARN] Failed to persist pending_approvals (rejected) for ${id}:`, e?.message || e);
-    }
-
-    emitAdminUpdate({ type: 'ngo', action: 'rejected', ngo: updated });
-    res.json({ ngo: updated });
+    emitAdminUpdate({ type: 'ngo', action: 'rejection_requested', ngo: updated });
+    res.json({ ngo: updated, queuedForSuperAdmin: true });
   } catch (e) {
     console.error('[ERROR] Failed to reject NGO:', e);
     res.status(500).json({ error: e.message });
@@ -4075,13 +4445,24 @@ app.post('/admin/ngos/:id/assign', ensureAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     const { regions = [], serviceTypes = [] } = req.body || {};
+    const now = new Date().toISOString();
+    const payload = {
+      regions: Array.isArray(regions) ? regions : [regions].filter(Boolean),
+      serviceTypes: Array.isArray(serviceTypes) ? serviceTypes : [serviceTypes].filter(Boolean),
+    };
     const updated = await writeUserMetadata(id, {
-      ngo_regions: Array.isArray(regions) ? regions : [regions].filter(Boolean),
-      ngo_service_types: Array.isArray(serviceTypes) ? serviceTypes : [serviceTypes].filter(Boolean),
-      ngo_assigned_at: new Date().toISOString(),
+      superadmin_request: {
+        type: 'ngo_assign',
+        requested_by: req.user.id,
+        requested_at: now,
+        payload,
+      },
     });
-    emitAdminUpdate({ type: 'ngo', action: 'assigned', ngo: updated });
-    res.json({ ngo: updated });
+    try {
+      await createAuditLog(req.user.id, 'ngo_assign_requested', 'ngo', id, { ...payload, requested_at: now });
+    } catch {}
+    emitAdminUpdate({ type: 'ngo', action: 'assign_requested', ngo: updated });
+    res.json({ ngo: updated, queuedForSuperAdmin: true });
   } catch (e) {
     console.error('[ERROR] Failed to assign NGO:', e);
     res.status(500).json({ error: e.message });
@@ -4092,9 +4473,20 @@ app.post('/admin/ngos/:id/access', ensureAdmin, async (req, res) => {
   try {
     const { id } = req.params;
     const { enabled = true } = req.body || {};
-    const updated = await writeUserMetadata(id, { is_blocked: !enabled, blocked: !enabled, blocked_at: !enabled ? new Date().toISOString() : null });
-    emitAdminUpdate({ type: 'ngo', action: enabled ? 'enabled' : 'disabled', ngo: updated });
-    res.json({ ngo: updated });
+    const now = new Date().toISOString();
+    const updated = await writeUserMetadata(id, {
+      superadmin_request: {
+        type: 'ngo_access',
+        requested_by: req.user.id,
+        requested_at: now,
+        payload: { enabled: !!enabled },
+      },
+    });
+    try {
+      await createAuditLog(req.user.id, 'ngo_access_requested', 'ngo', id, { enabled: !!enabled, requested_at: now });
+    } catch {}
+    emitAdminUpdate({ type: 'ngo', action: 'access_requested', ngo: updated });
+    res.json({ ngo: updated, queuedForSuperAdmin: true });
   } catch (e) {
     console.error('[ERROR] Failed to enable/disable NGO:', e);
     res.status(500).json({ error: e.message });

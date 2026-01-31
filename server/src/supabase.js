@@ -23,4 +23,5 @@ export const TABLES = {
   OTP_CODES: 'otp_codes',
   PENDING_APPROVALS: 'pending_approvals',
   NGOS: 'ngos',
+  AUDIT_LOGS: 'audit_logs',
 };

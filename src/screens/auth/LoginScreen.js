@@ -62,7 +62,7 @@ const LoginScreen = ({ navigation }) => {
       const data = await response.json();
 
       if (!response.ok) {
-        Alert.alert('Error', data.message || 'Failed to send OTP');
+        Alert.alert('Error', data.error || data.message || 'Failed to send OTP');
         return;
       }
 
@@ -98,7 +98,7 @@ const LoginScreen = ({ navigation }) => {
     const data = await response.json();
 
     if (!response.ok) {
-      Alert.alert('Error', data.message || 'Invalid OTP');
+      Alert.alert('Error', data.error || data.message || 'Invalid OTP');
       return;
     }
 
@@ -120,7 +120,9 @@ const LoginScreen = ({ navigation }) => {
           }],
         });
       } else {
-        if (role === 'admin') {
+        if (role === 'superadmin') {
+          navigation.reset({ index: 0, routes: [{ name: 'SuperAdminApp' }] });
+        } else if (role === 'admin') {
           navigation.reset({ index: 0, routes: [{ name: 'AdminApp' }] });
         } else if (role === 'volunteer') {
           navigation.reset({ index: 0, routes: [{ name: 'CaregiverApp' }] });
