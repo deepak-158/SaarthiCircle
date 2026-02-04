@@ -87,7 +87,7 @@ const SuperAdminHomeScreen = ({ navigation }) => {
               <Text style={styles.tileText}>Admins</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.tile} onPress={() => navigation.navigate('SuperAdminNgoRequests')}>
-              <MaterialCommunityIcons name="office-building-check" size={26} color={colors.primary.main} />
+              <MaterialCommunityIcons name="office-building" size={26} color={colors.primary.main} />
               <Text style={styles.tileText}>NGO Requests</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.tile} onPress={() => navigation.navigate('SuperAdminEscalations')}>

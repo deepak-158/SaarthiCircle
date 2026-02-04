@@ -1,9 +1,9 @@
 // Incident Management Screen
 import React, { useEffect, useMemo, useState } from 'react';
-import { 
-  View, 
-  Text, 
-  StyleSheet, 
+import {
+  View,
+  Text,
+  StyleSheet,
   SafeAreaView,
   ScrollView,
   TouchableOpacity,
@@ -12,6 +12,7 @@ import {
   RefreshControl,
   Alert,
   Linking,
+  Platform,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -39,6 +40,18 @@ const IncidentManagementScreen = ({ navigation }) => {
 
   useEffect(() => {
     loadIncidents();
+
+    // Quick connectivity check so UI doesn't fail silently
+    (async () => {
+      try {
+        const resp = await fetch(`${API_BASE}/health`);
+        if (!resp.ok) {
+          Alert.alert('Backend issue', `Backend not reachable (status ${resp.status}).\n\nBackend: ${API_BASE}`);
+        }
+      } catch (e) {
+        Alert.alert('Backend issue', `Cannot reach backend.\n\nBackend: ${API_BASE}`);
+      }
+    })();
 
     const initRealtime = async () => {
       try {
@@ -107,17 +120,31 @@ const IncidentManagementScreen = ({ navigation }) => {
         return;
       }
 
-      if (!resp.ok) throw new Error('Failed to load incidents');
+      if (!resp.ok) {
+        let msg = `Failed to load incidents (status ${resp.status})`;
+        try {
+          const errJson = await resp.json();
+          if (errJson?.error) msg = `${msg}: ${errJson.error}`;
+          if (errJson?.userRole) msg = `${msg}\nRole: ${errJson.userRole}`;
+        } catch { }
+        throw new Error(`${msg}\n\nBackend: ${API_BASE}`);
+      }
       const data = await resp.json();
       const mapped = (data?.incidents || []).map((i) => {
-        const seniorName = i?.senior?.name || i?.senior?.full_name || 'Senior';
-        const seniorPhone = i?.senior?.phone || i?.senior?.phoneNumber || i?.senior?.mobile || null;
+        const seniorName = i?.senior?.name || i?.senior?.full_name || i?.seniorName || 'Senior';
+        const seniorPhone = i?.senior?.phone || i?.senior?.phoneNumber || i?.senior?.mobile || i?.seniorPhone || null;
         const seniorId = i?.senior?.id || i?.seniorId || i?.senior_id || null;
-        const isEscalation = String(i?.type || '').toLowerCase().includes('escalation') || i?.source === 'help_request';
-        const status = i?.status === 'resolved' ? 'resolved' : (isEscalation ? 'in_progress' : 'open');
+        // Fix: Check escalation_level and escalated_at for SOS alerts
+        const isEscalation =
+          String(i?.type || '').toLowerCase().includes('escalation') ||
+          i?.source === 'help_request' ||
+          !!i?.escalated_at ||
+          (i?.escalation_level && i?.escalation_level !== 'none');
+
+        const status = String(i?.status || (isEscalation ? 'open' : 'open')).toLowerCase();
         return {
           id: i.id,
-          source: i?.source || null,
+          source: i?.source || i?.raw?.source || null,
           type: isEscalation ? 'Escalation' : (i.type || 'SOS'),
           priority: i.priority || (isEscalation ? 'high' : 'critical'),
           seniorName,
@@ -125,8 +152,8 @@ const IncidentManagementScreen = ({ navigation }) => {
           seniorId,
           description: i.description || '',
           status,
-          assignee: 'Unassigned',
-          createdAt: formatTimeAgo(i.createdAt),
+          assignee: i?.assignee || i?.assignedTo || (i?.volunteer?.name || i?.volunteer?.full_name) || 'Unassigned',
+          createdAt: formatTimeAgo(i.createdAt || i.created_at || i?.raw?.created_at),
           escalated: isEscalation,
           raw: i,
         };
@@ -134,7 +161,7 @@ const IncidentManagementScreen = ({ navigation }) => {
 
       setIncidents(mapped);
     } catch (e) {
-      // ignore
+      Alert.alert('Error', e?.message || `Failed to load incidents\n\nBackend: ${API_BASE}`);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -171,6 +198,8 @@ const IncidentManagementScreen = ({ navigation }) => {
     switch (status) {
       case 'open': return colors.accent.red;
       case 'in_progress': return colors.accent.orange;
+      case 'acknowledged': return colors.accent.orange; // Same as in_progress
+      case 'accepted': return colors.accent.orange;
       case 'resolved': return colors.secondary.green;
       default: return colors.neutral.gray;
     }
@@ -184,9 +213,13 @@ const IncidentManagementScreen = ({ navigation }) => {
     }
     const url = `tel:${phone}`;
     try {
-      const ok = await Linking.canOpenURL(url);
-      if (!ok) {
-        Alert.alert('Cannot call', `Please dial ${phone} manually.`);
+      if (Platform.OS === 'web') {
+        // Many browsers/dev envs block tel:; show number as fallback.
+        try {
+          await Linking.openURL(url);
+        } catch {
+          globalThis?.alert && globalThis.alert(`Call Senior: ${phone}`);
+        }
         return;
       }
       await Linking.openURL(url);
@@ -215,8 +248,10 @@ const IncidentManagementScreen = ({ navigation }) => {
         navigation.replace('Login');
         return;
       }
-      const data = await resp.json();
-      if (!resp.ok) throw new Error(data?.error || 'Failed to escalate');
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        throw new Error(`${data?.error || 'Failed to escalate'} (status ${resp.status})\n\nBackend: ${API_BASE}`);
+      }
 
       Alert.alert('Escalated', 'Escalated to SuperAdmin.');
       loadIncidents();
@@ -244,34 +279,71 @@ const IncidentManagementScreen = ({ navigation }) => {
         return;
       }
 
-      const volsData = await volsResp.json();
+      const volsData = await volsResp.json().catch(() => ({}));
+      if (!volsResp.ok) {
+        throw new Error(`${volsData?.error || 'Failed to load volunteers'} (status ${volsResp.status})\n\nBackend: ${API_BASE}`);
+      }
       const volunteers = Array.isArray(volsData?.volunteers) ? volsData.volunteers : [];
       if (!volunteers.length) {
         Alert.alert('No volunteers', 'No approved online volunteers are available right now.');
         return;
       }
 
-      const buttons = volunteers.slice(0, 5).map((v) => ({
-        text: v.name || v.full_name || v.email || String(v.id).slice(0, 8),
-        onPress: async () => {
-          try {
-            const resp = await fetch(`${API_BASE}/admin/sos-alerts/${incident.id}/reassign`, {
-              method: 'POST',
-              headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-              body: JSON.stringify({ volunteerId: v.id }),
-            });
-            const data = await resp.json();
-            if (!resp.ok) throw new Error(data?.error || 'Failed to assign');
-            Alert.alert('Assigned', 'Volunteer assigned to SOS case.');
-            loadIncidents();
-          } catch (e) {
-            Alert.alert('Error', e.message || 'Failed to assign');
-          }
-        },
-      }));
+      const assignTo = async (v) => {
+        const resp = await fetch(`${API_BASE}/admin/sos-alerts/${incident.id}/reassign`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ volunteerId: v.id }),
+        });
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data?.error || 'Failed to assign');
+      };
 
-      buttons.push({ text: 'Cancel', style: 'cancel' });
-      Alert.alert('Assign Volunteer', 'Choose an available volunteer:', buttons);
+      if (Platform.OS === 'web') {
+        const list = volunteers.slice(0, 10).map((v, idx) => `${idx + 1}. ${v.name || v.full_name || v.email || String(v.id).slice(0, 8)}`).join('\n');
+        const msg = `Choose a volunteer by number:\n\n${list}`;
+        const input = globalThis?.prompt ? globalThis.prompt(msg, '1') : '1';
+        const idx = Math.max(1, Number(input) || 1) - 1;
+        const chosen = volunteers[idx] || volunteers[0];
+        if (!chosen) {
+          globalThis?.alert && globalThis.alert('No volunteers available.');
+          return;
+        }
+        try {
+          await assignTo(chosen);
+          globalThis?.alert && globalThis.alert('Volunteer assigned to SOS case.');
+          loadIncidents();
+        } catch (e) {
+          globalThis?.alert && globalThis.alert(e?.message || 'Failed to assign');
+        }
+        return;
+      }
+
+      const showVolunteerPicker = (startIndex = 0) => {
+        const page = volunteers.slice(startIndex, startIndex + 2);
+        const buttons = page.map((v) => ({
+          text: v.name || v.full_name || v.email || String(v.id).slice(0, 8),
+          onPress: async () => {
+            try {
+              await assignTo(v);
+              Alert.alert('Assigned', 'Volunteer assigned to SOS case.');
+              loadIncidents();
+            } catch (e) {
+              Alert.alert('Error', e.message || 'Failed to assign');
+            }
+          },
+        }));
+
+        if (startIndex + 2 < volunteers.length) {
+          buttons.push({ text: 'More', onPress: () => showVolunteerPicker(startIndex + 2) });
+        } else {
+          buttons.push({ text: 'Done', style: 'cancel' });
+        }
+
+        Alert.alert('Assign Volunteer', 'Choose an available volunteer:', buttons, { cancelable: true });
+      };
+
+      showVolunteerPicker(0);
     } catch (e) {
       Alert.alert('Error', e.message || 'Failed to load volunteers');
     }
@@ -280,9 +352,9 @@ const IncidentManagementScreen = ({ navigation }) => {
   const filteredIncidents = useMemo(() => {
     const normalized = (searchQuery || '').trim().toLowerCase();
     return incidents.filter(incident => {
-      if (activeTab === 'open' && incident.status !== 'open') return false;
-      if (activeTab === 'in_progress' && incident.status !== 'in_progress') return false;
-      if (activeTab === 'resolved' && incident.status !== 'resolved') return false;
+      if (activeTab === 'open' && incident.status !== 'open' && incident.status !== 'active') return false;
+      if (activeTab === 'in_progress' && incident.status !== 'in_progress' && incident.status !== 'accepted' && incident.status !== 'acknowledged') return false;
+      if (activeTab === 'resolved' && incident.status !== 'resolved' && incident.status !== 'closed') return false;
       if (!normalized) return true;
       return (
         String(incident.seniorName || '').toLowerCase().includes(normalized) ||
@@ -293,16 +365,16 @@ const IncidentManagementScreen = ({ navigation }) => {
   }, [incidents, activeTab, searchQuery]);
 
   const stats = useMemo(() => ({
-    open: incidents.filter(i => i.status === 'open').length,
-    inProgress: incidents.filter(i => i.status === 'in_progress').length,
-    resolved: incidents.filter(i => i.status === 'resolved').length,
+    open: incidents.filter(i => i.status === 'open' || i.status === 'active').length,
+    inProgress: incidents.filter(i => i.status === 'in_progress' || i.status === 'accepted' || i.status === 'acknowledged').length,
+    resolved: incidents.filter(i => i.status === 'resolved' || i.status === 'closed').length,
   }), [incidents]);
 
   return (
     <SafeAreaView style={styles.safeArea}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity 
+        <TouchableOpacity
           onPress={() => navigation.goBack()}
           style={styles.backButton}
         >
@@ -363,7 +435,7 @@ const IncidentManagementScreen = ({ navigation }) => {
 
       {/* Tabs */}
       <View style={styles.tabContainer}>
-        <TouchableOpacity 
+        <TouchableOpacity
           style={[styles.tab, activeTab === 'open' && styles.tabActive]}
           onPress={() => setActiveTab('open')}
         >
@@ -371,7 +443,7 @@ const IncidentManagementScreen = ({ navigation }) => {
             Open
           </Text>
         </TouchableOpacity>
-        <TouchableOpacity 
+        <TouchableOpacity
           style={[styles.tab, activeTab === 'in_progress' && styles.tabActive]}
           onPress={() => setActiveTab('in_progress')}
         >
@@ -379,7 +451,7 @@ const IncidentManagementScreen = ({ navigation }) => {
             In Progress
           </Text>
         </TouchableOpacity>
-        <TouchableOpacity 
+        <TouchableOpacity
           style={[styles.tab, activeTab === 'resolved' && styles.tabActive]}
           onPress={() => setActiveTab('resolved')}
         >
@@ -389,7 +461,7 @@ const IncidentManagementScreen = ({ navigation }) => {
         </TouchableOpacity>
       </View>
 
-      <ScrollView 
+      <ScrollView
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         refreshControl={
@@ -406,10 +478,9 @@ const IncidentManagementScreen = ({ navigation }) => {
           </View>
         )}
         {filteredIncidents.map(incident => (
-          <TouchableOpacity 
+          <View
             key={incident.id}
             style={[styles.incidentCard, shadows.sm]}
-            onPress={() => navigation.navigate('IncidentDetail', { incidentId: incident.id })}
           >
             {/* Priority Indicator */}
             <View style={[
@@ -469,7 +540,7 @@ const IncidentManagementScreen = ({ navigation }) => {
                     size={16}
                     color={colors.neutral.darkGray}
                   />
-                  <Text style={styles.footerText}>{incident.assignee}</Text>
+                  <Text style={styles.footerText}>{incident.assignee || 'N/A'}</Text>
                 </View>
                 <View style={styles.footerItem}>
                   <MaterialCommunityIcons
@@ -477,7 +548,7 @@ const IncidentManagementScreen = ({ navigation }) => {
                     size={16}
                     color={colors.neutral.darkGray}
                   />
-                  <Text style={styles.footerText}>{incident.createdAt}</Text>
+                  <Text style={styles.footerText}>{incident.createdAt || 'N/A'}</Text>
                 </View>
                 <View style={[
                   styles.statusBadge,
@@ -491,8 +562,9 @@ const IncidentManagementScreen = ({ navigation }) => {
                     styles.statusText,
                     { color: getStatusColor(incident.status) }
                   ]}>
-                    {incident.status === 'in_progress' ? 'In Progress' : 
-                     incident.status.charAt(0).toUpperCase() + incident.status.slice(1)}
+                    {incident.status === 'in_progress' ? 'In Progress' :
+                      incident.status === 'acknowledged' ? 'In Progress' :
+                        incident.status.charAt(0).toUpperCase() + incident.status.slice(1)}
                   </Text>
                 </View>
               </View>
@@ -531,7 +603,7 @@ const IncidentManagementScreen = ({ navigation }) => {
                 </TouchableOpacity>
               </View>
             </View>
-          </TouchableOpacity>
+          </View>
         ))}
 
         {filteredIncidents.length === 0 && (

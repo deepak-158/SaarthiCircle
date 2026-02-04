@@ -393,7 +393,7 @@ const AdminHomeScreen = ({ navigation }) => {
           >
             <View style={[styles.actionIcon, { backgroundColor: '#F3E5F5' }]}>
               <MaterialCommunityIcons
-                name="office-building-check"
+                name="office-building"
                 size={28}
                 color="#6A1B9A"
               />

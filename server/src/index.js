@@ -8,7 +8,7 @@ import nodemailer from 'nodemailer';
 import jwt from 'jsonwebtoken';
 import { randomUUID } from 'crypto';
 const app = express();
-app.use(cors({ origin: '*'}));
+app.use(cors({ origin: '*' }));
 app.use(express.json());
 
 // Log all requests
@@ -22,13 +22,13 @@ app.use((req, res, next) => {
 
 const server = http.createServer(app);
 const io = new SocketIOServer(server, {
-  cors: { origin: '*'}
+  cors: { origin: '*' }
 });
 
 const emitAdminUpdate = (payload) => {
   try {
     io.to('admins').emit('admin:update', { ...payload, ts: new Date().toISOString() });
-  } catch {}
+  } catch { }
 };
 
 const emitNgoUpdate = ({ ngoId, ...payload } = {}) => {
@@ -38,18 +38,18 @@ const emitNgoUpdate = ({ ngoId, ...payload } = {}) => {
       return;
     }
     io.to('ngos').emit('ngo:update', { ...payload, ts: new Date().toISOString() });
-  } catch {}
+  } catch { }
 };
 
 const sosEscalationTimers = new Map(); // sosId -> timeoutId
 
-const SOS_ACTIVE_STATUSES = new Set(['active', 'accepted', 'in_progress']);
+const SOS_ACTIVE_STATUSES = new Set(['active', 'open', 'accepted', 'in_progress']);
 
 const clearSosEscalationTimer = (sosId) => {
   try {
     const t = sosEscalationTimers.get(sosId);
     if (t) clearTimeout(t);
-  } catch {}
+  } catch { }
   sosEscalationTimers.delete(sosId);
 };
 
@@ -68,7 +68,7 @@ const scheduleSosAutoEscalation = ({ sosId, seconds = 60 }) => {
       if (!data) return;
 
       const st = String(data.status || '').toLowerCase();
-      if (st !== 'active') return;
+      if (st !== 'active' && st !== 'open') return;
 
       // If schema supports it, best-effort mark escalation metadata.
       const now = new Date().toISOString();
@@ -77,11 +77,11 @@ const scheduleSosAutoEscalation = ({ sosId, seconds = 60 }) => {
           .from(TABLES.SOS_ALERTS)
           .update({ escalated_at: now, escalation_level: 'auto' })
           .eq('id', sosId);
-      } catch {}
+      } catch { }
 
       emitAdminUpdate({ type: 'sos_alert', action: 'auto_escalated', alert: { ...data, escalated_at: now, escalation_level: 'auto' } });
       emitNgoUpdate({ type: 'sos_alert', action: 'auto_escalated', alert: { ...data, escalated_at: now, escalation_level: 'auto' } });
-    } catch {}
+    } catch { }
   }, delayMs);
 
   sosEscalationTimers.set(sosId, timerId);
@@ -93,7 +93,7 @@ const clearSosMultiStageTimers = (sosId) => {
     const timers = sosMultiStageTimers.get(sosId);
     if (timers?.stage1) clearTimeout(timers.stage1);
     if (timers?.stage2) clearTimeout(timers.stage2);
-  } catch {}
+  } catch { }
   sosMultiStageTimers.delete(sosId);
 };
 
@@ -138,7 +138,7 @@ const scheduleSosMultiStageEscalation = ({ sosId, stage1Seconds = 180, stage2Sec
       const { data } = await supabase.from(TABLES.SOS_ALERTS).select('*').eq('id', sosId).maybeSingle();
       if (!data) return;
       const st = String(data.status || '').toLowerCase();
-      if (st !== 'active') return;
+      if (st !== 'active' && st !== 'open') return;
 
       const now = new Date().toISOString();
       try {
@@ -146,14 +146,14 @@ const scheduleSosMultiStageEscalation = ({ sosId, stage1Seconds = 180, stage2Sec
           .from(TABLES.SOS_ALERTS)
           .update({ escalated_at: now, escalation_level: 'auto_stage1' })
           .eq('id', sosId);
-      } catch {}
+      } catch { }
 
       emitAdminUpdate({ type: 'sos_alert', action: 'escalated_stage1', alert: { ...data, escalated_at: now, escalation_level: 'auto_stage1' } });
       emitNgoUpdate({ type: 'sos_alert', action: 'escalated_stage1', alert: { ...data, escalated_at: now, escalation_level: 'auto_stage1' } });
       try {
         await createAuditLog('system', 'sos_escalated_stage1', 'sos_alert', sosId, { at: now });
-      } catch {}
-    } catch {}
+      } catch { }
+    } catch { }
   }, s1Ms);
 
   const stage2 = setTimeout(async () => {
@@ -161,7 +161,7 @@ const scheduleSosMultiStageEscalation = ({ sosId, stage1Seconds = 180, stage2Sec
       const { data } = await supabase.from(TABLES.SOS_ALERTS).select('*').eq('id', sosId).maybeSingle();
       if (!data) return;
       const st = String(data.status || '').toLowerCase();
-      if (st !== 'active') return;
+      if (st !== 'active' && st !== 'open') return;
 
       const now = new Date().toISOString();
       // Attempt to extract emergency phones if stored.
@@ -171,7 +171,7 @@ const scheduleSosMultiStageEscalation = ({ sosId, stage1Seconds = 180, stage2Sec
         try {
           const parsed = JSON.parse(data.emergency_phones);
           if (Array.isArray(parsed)) phones.push(...parsed);
-        } catch {}
+        } catch { }
       }
 
       const smsText = process.env.SOS_SMS_TEMPLATE || 'SOS ALERT: A senior needs urgent help. Please call immediately.';
@@ -182,14 +182,14 @@ const scheduleSosMultiStageEscalation = ({ sosId, stage1Seconds = 180, stage2Sec
           .from(TABLES.SOS_ALERTS)
           .update({ escalated_at: now, escalation_level: 'auto_stage2' })
           .eq('id', sosId);
-      } catch {}
+      } catch { }
 
       emitAdminUpdate({ type: 'sos_alert', action: 'escalated_stage2', alert: { ...data, escalated_at: now, escalation_level: 'auto_stage2' }, sms: smsResult });
       emitNgoUpdate({ type: 'sos_alert', action: 'escalated_stage2', alert: { ...data, escalated_at: now, escalation_level: 'auto_stage2' }, sms: smsResult });
       try {
         await createAuditLog('system', 'sos_escalated_stage2', 'sos_alert', sosId, { at: now, sms: smsResult });
-      } catch {}
-    } catch {}
+      } catch { }
+    } catch { }
   }, s2Ms);
 
   sosMultiStageTimers.set(sosId, { stage1, stage2 });
@@ -199,7 +199,10 @@ const isApprovedVolunteerUser = (u) => {
   const parsed = parseProfileData(u);
   const role = String(parsed?.role || u?.role || '').toLowerCase();
   if (role !== 'volunteer') return false;
-  return parsed?.is_approved === true;
+  // Treat volunteers as approved unless explicitly marked not approved.
+  // This keeps behavior consistent with endpoints that allow role=volunteer.
+  if (parsed?.is_approved === false) return false;
+  return true;
 };
 
 const extractAssignedNgoIdForSenior = (senior) => {
@@ -244,7 +247,7 @@ const notifyOnlineVolunteersOfSos = async ({ alert, senior }) => {
       if (!socketId) return;
       io.to(socketId).emit('sos:new', { alert, senior: s ? { id: s.id, name: s.name || s.full_name, phone: s.phone, region: seniorRegion } : { id: sid } });
     });
-  } catch {}
+  } catch { }
 };
 
 // In-memory presence and session routing
@@ -434,9 +437,9 @@ const ensureAuth = async (req, res, next) => {
     if (token.startsWith('demo_')) {
       const role = token.split('_')[1];
       console.log(`[AUTH] Demo login detected for role: ${role}`);
-      req.user = { 
-        id: token, 
-        email: `${role}@saathicircle.com`, 
+      req.user = {
+        id: token,
+        email: `${role}@saathicircle.com`,
         role: role,
         name: `Demo ${role.charAt(0).toUpperCase() + role.slice(1)}`
       };
@@ -447,7 +450,7 @@ const ensureAuth = async (req, res, next) => {
     try {
       const decoded = jwt.verify(token, process.env.JWT_SECRET || 'dev_secret_change_me');
       req.user = { id: decoded.uid, email: decoded.email };
-      
+
       // Fetch full user to get role
       try {
         const { data: user } = await supabase.from(TABLES.USERS).select('*').eq('id', decoded.uid).single();
@@ -457,7 +460,7 @@ const ensureAuth = async (req, res, next) => {
       } catch (dbErr) {
         console.warn(`[AUTH] DB user lookup failed for ${decoded.uid}: ${dbErr.message}`);
       }
-      
+
       return next(); // Token is valid, proceed (even if user not in DB yet)
     } catch (err) {
       // If it looks like our JWT but failed verification, don't fall back
@@ -472,12 +475,12 @@ const ensureAuth = async (req, res, next) => {
     if (error || !data?.user) {
       return res.status(401).json({ error: 'Invalid token' });
     }
-    
+
     req.user = { id: data.user.id, email: data.user.email, phone: data.user.phone };
     // Fetch role from users table
     const { data: user } = await supabase.from(TABLES.USERS).select('*').eq('id', data.user.id).single();
     if (user) req.user = { ...req.user, ...user };
-    
+
     next();
   } catch (e) {
     console.error(`[AUTH] Unexpected error:`, e);
@@ -695,7 +698,7 @@ app.post('/superadmin/ngos/:id/requests/decide', ensureSuperAdmin, async (req, r
     if (type === 'ngo_approve') {
       try {
         await supabase.from(TABLES.USERS).update({ role: 'ngo', updated_at: now }).eq('id', id);
-      } catch {}
+      } catch { }
       updated = await writeUserMetadata(id, {
         is_approved: true,
         is_verified: true,
@@ -710,16 +713,16 @@ app.post('/superadmin/ngos/:id/requests/decide', ensureSuperAdmin, async (req, r
       });
       try {
         await supabase.from(TABLES.NGOS).upsert({ user_id: id, status: 'approved', updated_at: now }, { onConflict: 'user_id' });
-      } catch {}
+      } catch { }
       try {
         await supabase.from(TABLES.PENDING_APPROVALS).update({ status: 'approved', decided_at: now }).eq('uid', id);
-      } catch {}
+      } catch { }
       await createAuditLog(req.user.id, 'ngo_approved', 'ngo', id, { request });
     } else if (type === 'ngo_reject') {
       const reason = String(request?.payload?.reason || request?.reason || '');
       try {
         await supabase.from(TABLES.USERS).update({ role: 'ngo_rejected', updated_at: now }).eq('id', id);
-      } catch {}
+      } catch { }
       updated = await writeUserMetadata(id, {
         is_approved: false,
         is_verified: false,
@@ -733,10 +736,10 @@ app.post('/superadmin/ngos/:id/requests/decide', ensureSuperAdmin, async (req, r
       });
       try {
         await supabase.from(TABLES.NGOS).upsert({ user_id: id, status: 'rejected', updated_at: now }, { onConflict: 'user_id' });
-      } catch {}
+      } catch { }
       try {
         await supabase.from(TABLES.PENDING_APPROVALS).update({ status: 'rejected', decided_at: now }).eq('uid', id);
-      } catch {}
+      } catch { }
       await createAuditLog(req.user.id, 'ngo_rejected', 'ngo', id, { reason, request });
     } else if (type === 'ngo_assign') {
       const regions = Array.isArray(request?.payload?.regions) ? request.payload.regions : [];
@@ -786,7 +789,7 @@ app.post('/superadmin/ngos/:id/requests/decide', ensureSuperAdmin, async (req, r
           updateUser.updated_at = now;
           await supabase.from(TABLES.USERS).update(updateUser).eq('id', id);
         }
-      } catch {}
+      } catch { }
 
       try {
         const updateNgo = { updated_at: now };
@@ -794,7 +797,7 @@ app.post('/superadmin/ngos/:id/requests/decide', ensureSuperAdmin, async (req, r
         if (nextEmail !== undefined) updateNgo.email = nextEmail || null;
         if (nextContact !== undefined) updateNgo.contact_person = nextContact || null;
         await supabase.from(TABLES.NGOS).upsert({ user_id: id, ...updateNgo }, { onConflict: 'user_id' });
-      } catch {}
+      } catch { }
 
       updated = await writeUserMetadata(id, {
         ...(nextContact !== undefined ? { contact_person: nextContact || null, contactPerson: nextContact || null } : {}),
@@ -807,10 +810,10 @@ app.post('/superadmin/ngos/:id/requests/decide', ensureSuperAdmin, async (req, r
       });
       try {
         await supabase.from(TABLES.PENDING_APPROVALS).update({ status: 'approved', decided_at: now }).eq('uid', id);
-      } catch {}
+      } catch { }
       try {
         await logNgoActivity({ ngoId: id, action: 'profile_update_approved', entityType: 'ngo', entityId: id, details: reqPatch });
-      } catch {}
+      } catch { }
       await createAuditLog(req.user.id, 'ngo_profile_update_approved', 'ngo', id, { request });
     } else if (type === 'ngo_profile_update_reject') {
       const reason = String(request?.payload?.reason || request?.reason || '');
@@ -824,10 +827,10 @@ app.post('/superadmin/ngos/:id/requests/decide', ensureSuperAdmin, async (req, r
       });
       try {
         await supabase.from(TABLES.PENDING_APPROVALS).update({ status: 'rejected', decided_at: now }).eq('uid', id);
-      } catch {}
+      } catch { }
       try {
         await logNgoActivity({ ngoId: id, action: 'profile_update_rejected', entityType: 'ngo', entityId: id, details: { reason } });
-      } catch {}
+      } catch { }
       await createAuditLog(req.user.id, 'ngo_profile_update_rejected', 'ngo', id, { reason, request });
     } else {
       return res.status(400).json({ error: `Unknown request type: ${type}` });
@@ -850,7 +853,7 @@ app.get('/superadmin/escalations', ensureSuperAdmin, async (req, res) => {
     const lim = Math.min(500, Math.max(1, Number(limit) || 200));
     const [helpRes, sosRes] = await Promise.all([
       supabase.from(TABLES.HELP_REQUESTS).select('*').eq('status', 'escalated').order('created_at', { ascending: false }).limit(lim),
-      supabase.from(TABLES.SOS_ALERTS).select('*').eq('status', 'active').order('created_at', { ascending: false }).limit(lim),
+      supabase.from(TABLES.SOS_ALERTS).select('*').in('status', ['active', 'open']).order('created_at', { ascending: false }).limit(lim),
     ]);
     res.json({ helpRequests: helpRes?.data || [], sosAlerts: sosRes?.data || [] });
   } catch (e) {
@@ -983,7 +986,7 @@ app.get('/conversations/:id/messages', async (req, res) => {
       .select('id')
       .eq('id', id)
       .single();
-    
+
     if (convoError || !convo) {
       return res.status(404).json({ error: 'Conversation not found' });
     }
@@ -1023,7 +1026,7 @@ app.get('/conversations/:id/messages', async (req, res) => {
     }
 
     if (error) throw error;
-    
+
     console.log(`[CHAT] Retrieved ${data?.length || 0} messages for conversation ${id}`);
     res.json({ messages: data || [] });
   } catch (e) {
@@ -1038,30 +1041,30 @@ app.post('/conversations/:id/messages', async (req, res) => {
     const { id } = req.params;
     const { senderId, content, type } = req.body || {};
     if (!senderId || !content) return res.status(400).json({ error: 'senderId and content required' });
-    
+
     // Validate conversation exists
     const { data: convo, error: convoError } = await supabase
       .from(TABLES.CONVERSATIONS)
       .select('id')
       .eq('id', id)
       .single();
-    
+
     if (convoError || !convo) {
       return res.status(404).json({ error: 'Conversation not found' });
     }
 
     const message = await saveMessage({ conversationId: id, senderId, content, type });
-    
+
     // Ensure conversation_id is included in the broadcasted message
     const messageToEmit = {
       ...message,
       conversation_id: id,
     };
-    
+
     // CRITICAL: Only broadcast to the specific conversation room
     io.to(`conv:${id}`).emit('message:new', messageToEmit);
     console.log(`[CHAT] Message posted to conversation ${id} from ${senderId}`);
-    
+
     res.json({ message: messageToEmit });
   } catch (e) {
     console.error(`[ERROR] Failed to post message:`, e);
@@ -1075,14 +1078,14 @@ app.post('/conversations/:id/end', async (req, res) => {
     const { id } = req.params;
     const { userId } = req.body || {};
     if (!userId) return res.status(400).json({ error: 'userId required' });
-    
+
     // Validate conversation exists
     const { data: convo, error: convoError } = await supabase
       .from(TABLES.CONVERSATIONS)
       .select('id, status')
       .eq('id', id)
       .single();
-    
+
     if (convoError || !convo) {
       return res.status(404).json({ error: 'Conversation not found' });
     }
@@ -1094,13 +1097,13 @@ app.post('/conversations/:id/end', async (req, res) => {
       .eq('id', id)
       .select()
       .single();
-    
+
     if (updateError) throw updateError;
-    
+
     // Notify all participants that chat has ended
     io.to(`conv:${id}`).emit('chat:ended', { conversationId: id, endedBy: userId });
     console.log(`[CHAT] Conversation ${id} ended by ${userId}`);
-    
+
     res.json({ conversation: updated });
   } catch (e) {
     console.error(`[ERROR] Failed to end conversation:`, e);
@@ -1129,7 +1132,7 @@ io.on('connection', (socket) => {
     }
     if (role === 'VOLUNTEER') {
       onlineVolunteers.set(userId, socket.id);
-      setVolunteerAvailability({ volunteerId: userId, isOnline: true }).catch(() => {});
+      setVolunteerAvailability({ volunteerId: userId, isOnline: true }).catch(() => { });
       io.emit('volunteer:online', { volunteerId: userId });
       console.log(`[SOCKET] Volunteer ${userId} now online`);
 
@@ -1161,7 +1164,7 @@ io.on('connection', (socket) => {
       if (nextOnline) {
         onlineVolunteers.set(vid, socket.id);
         io.emit('volunteer:online', { volunteerId: vid });
-        claimFirstPendingChatForVolunteer({ volunteerId: vid }).catch(() => {});
+        claimFirstPendingChatForVolunteer({ volunteerId: vid }).catch(() => { });
       } else {
         onlineVolunteers.delete(vid);
         io.emit('volunteer:offline', { volunteerId: vid });
@@ -1175,9 +1178,9 @@ io.on('connection', (socket) => {
   socket.on('seeker:request', async ({ seniorId, requestType = 'chat', note = '' }) => {
     try {
       if (!seniorId) return;
-      
+
       console.log(`[REQUEST] New seeker request from ${seniorId}: type=${requestType}`);
-      
+
       // Store in memory for quick lookup
       pendingRequests.set(seniorId, { status: 'pending', requestType, note });
 
@@ -1190,7 +1193,7 @@ io.on('connection', (socket) => {
             .from(TABLES.USERS)
             .select('id')
             .eq('id', seniorId);
-          
+
           // If not found or error, try to create
           if (selectError || !existingSenior || existingSenior.length === 0) {
             console.log(`[REQUEST] Senior ${seniorId} doesn't have users table record, creating one`);
@@ -1199,7 +1202,7 @@ io.on('connection', (socket) => {
               role: 'elderly',
               created_at: new Date().toISOString(),
             });
-            
+
             if (insertError) {
               console.warn(`[REQUEST] Could not create users record:`, insertError.message);
             } else {
@@ -1369,7 +1372,7 @@ io.on('connection', (socket) => {
         .update({ status: 'ended', ended_at: new Date().toISOString() })
         .eq('id', conversationId);
       if (error) throw error;
-      
+
       // Notify all participants that chat has ended
       io.to(`conv:${conversationId}`).emit('chat:ended', { conversationId, endedBy: userId });
       console.log(`[CHAT] Conversation ${conversationId} ended by ${userId}`);
@@ -1404,8 +1407,8 @@ io.on('connection', (socket) => {
       // Get the specific volunteer's socket
       const calleeSocketId = userSockets.get(calleeId);
       if (!calleeSocketId) {
-        return socket.emit('call:failed', { 
-          conversationId, 
+        return socket.emit('call:failed', {
+          conversationId,
           reason: 'Volunteer not available',
           message: 'The volunteer is currently offline. Please try again later.'
         });
@@ -1431,7 +1434,7 @@ io.on('connection', (socket) => {
       console.log(`[CALL] Incoming call notification sent to volunteer ${calleeId}`);
 
       // Send push notification to volunteer
-      sendPushNotification(calleeId, 'Incoming Call', `${callerName || 'A senior'} is calling you`, { 
+      sendPushNotification(calleeId, 'Incoming Call', `${callerName || 'A senior'} is calling you`, {
         conversationId,
         callerId,
         type: 'voice_call'
@@ -1549,7 +1552,7 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => {
     if (socket.data?.role === 'VOLUNTEER' && socket.data?.userId) {
       onlineVolunteers.delete(socket.data.userId);
-      setVolunteerAvailability({ volunteerId: socket.data.userId, isOnline: false }).catch(() => {});
+      setVolunteerAvailability({ volunteerId: socket.data.userId, isOnline: false }).catch(() => { });
       io.emit('volunteer:offline', { volunteerId: socket.data.userId });
     }
     if (socket.data?.userId) {
@@ -1567,20 +1570,23 @@ const ensureAdmin = (req, res, next) => {
       role: req.user?.role,
       email: req.user?.email
     });
-    
+
     if (!req.user) {
       console.error(`[AUTH] No user object found`);
       return res.status(403).json({ error: 'Forbidden: User not authenticated' });
     }
-    
-    if (req.user.role !== 'admin') {
+
+    const parsedUser = parseProfileData(req.user);
+    req.user = parsedUser;
+    const role = String(parsedUser?.role || '').toLowerCase();
+    if (role !== 'admin' && role !== 'superadmin') {
       console.warn(`[AUTH] Admin access denied for user ${req.user?.id} with role ${req.user?.role}`);
-      return res.status(403).json({ 
+      return res.status(403).json({
         error: 'Forbidden: Admin access required',
-        userRole: req.user?.role
+        userRole: req.user?.role,
       });
     }
-    
+
     console.log(`[AUTH] Admin access granted for user ${req.user.id}`);
     next();
   });
@@ -1712,7 +1718,7 @@ const parseProfileData = (user) => {
   } catch (e) {
     console.warn(`[WARN] Failed to parse metadata for user ${user.id}`);
   }
-  
+
   // Flatten metadata into user object
   return {
     ...user,
@@ -1742,7 +1748,7 @@ app.post('/auth/send-otp', async (req, res) => {
     const emailNorm = String(email).trim().toLowerCase();
     const code = Math.floor(100000 + Math.random() * 900000).toString();
     const expiresAt = Date.now() + 10 * 60 * 1000; // 10 minutes
-    
+
     console.log(`[INFO] Generated OTP ${code} for ${emailNorm}`);
     otpStore.set(emailNorm, { code, expiresAt, phone: phoneNorm });
     // Dev aid: log OTP so you can verify quickly during development
@@ -1781,7 +1787,7 @@ app.post('/auth/send-otp', async (req, res) => {
           otpErr = fallback.error;
         }
       }
-      
+
       if (otpErr) {
         console.warn(`[WARN] Failed to persist OTP for ${emailNorm}: ${otpErr.message} (${otpErr.code || 'no_code'})`);
         console.warn(`[DEBUG] Full error object:`, JSON.stringify(otpErr));
@@ -1831,12 +1837,12 @@ app.post('/auth/verify-otp', async (req, res) => {
         .from(TABLES.OTP_CODES)
         .select('*')
         .eq('email', emailNorm)
-        .maybeSingle(); 
-      
+        .maybeSingle();
+
       if (otpErr) {
         console.warn(`[WARN] OTP DB lookup failed for ${emailNorm}: ${otpErr.message}`);
       }
-      
+
       if (otpRow) {
         console.log(`[DB] OTP found in database for ${emailNorm}. Code: ${otpRow.code}`);
         rec = {
@@ -1930,8 +1936,8 @@ app.post('/auth/verify-otp', async (req, res) => {
 
     // Also prevent existing users from switching to superadmin role via login
     if (existing && existing.role !== 'superadmin' && role === 'superadmin') {
-        console.warn(`[AUTH] Blocked attempt to switch to superadmin role: ${emailNorm}`);
-        return res.status(403).json({ error: 'Unauthorized role assignment.' });
+      console.warn(`[AUTH] Blocked attempt to switch to superadmin role: ${emailNorm}`);
+      return res.status(403).json({ error: 'Unauthorized role assignment.' });
     }
 
     const profile = {
@@ -1942,17 +1948,17 @@ app.post('/auth/verify-otp', async (req, res) => {
       role: role ?? existing?.role ?? null,
       gender: gender ?? existing?.gender ?? null,
     };
-    
+
     // Determine approved status
     // IMPORTANT: Some deployments store approval only in metadata (avatar_emoji JSON).
     // Using existing?.is_approved can incorrectly reset approved volunteers to false.
     const existingApproved = existingParsed?.is_approved === true;
     const isApproved = role === 'admin' || role === 'superadmin' || role === 'elderly' ? true : existingApproved;
-    
+
     // Preserve existing avatar_emoji if it contains JSON metadata
     const currentAvatar = existing?.avatar_emoji;
     const isJson = currentAvatar && (currentAvatar.startsWith('{') || currentAvatar.startsWith('['));
-    
+
     if (!isJson) {
       const metadata = {
         gender: gender ?? existing?.gender,
@@ -1969,7 +1975,7 @@ app.post('/auth/verify-otp', async (req, res) => {
         profile.avatar_emoji = currentAvatar;
       }
     }
-    
+
     const { error: upsertErr } = await supabase.from(TABLES.USERS).upsert(profile, { onConflict: 'id' });
     if (upsertErr) {
       console.error(`[AUTH] Failed to upsert profile for ${emailNorm}:`, upsertErr);
@@ -1980,7 +1986,7 @@ app.post('/auth/verify-otp', async (req, res) => {
     if (isNew && profile.email) { await sendWelcomeEmail(profile.email, profile.name); }
 
     const access_token = jwt.sign({ uid: id, email: emailNorm }, process.env.JWT_SECRET || 'dev_secret_change_me', { expiresIn: '7d' });
-    
+
     const responseData = {
       access_token,
       user: {
@@ -1993,7 +1999,7 @@ app.post('/auth/verify-otp', async (req, res) => {
         avatar_emoji: profile.avatar_emoji,
       },
     };
-    
+
     console.log(`[AUTH] Verification successful for ${emailNorm}. Returning profile with role: ${profile.role}`);
     res.json(responseData);
   } catch (e) {
@@ -2067,7 +2073,7 @@ app.put('/profile', ensureAuth, async (req, res) => {
 
     if (name !== undefined) update.name = name;
     else if (full_name !== undefined) update.name = full_name;
-    
+
     if (phone !== undefined) update.phone = phone;
     if (gender !== undefined) {
       update.gender = gender;
@@ -2083,7 +2089,7 @@ app.put('/profile', ensureAuth, async (req, res) => {
         .select('avatar_emoji')
         .eq('id', req.user.id)
         .single();
-      
+
       if (existingData?.avatar_emoji) {
         try {
           if (typeof existingData.avatar_emoji === 'string' && (existingData.avatar_emoji.startsWith('{') || existingData.avatar_emoji.startsWith('['))) {
@@ -2188,11 +2194,11 @@ app.post('/register/senior', ensureAuth, async (req, res) => {
         phone: phone || req.user.phone,
         updated_at: new Date().toISOString()
       };
-      
+
       const { error: seniorErr } = await supabase
         .from(TABLES.SENIORS)
         .upsert(seniorProfile, { onConflict: 'user_id' });
-        
+
       if (seniorErr) {
         console.warn(`[WARN] Failed to auto-save to seniors table:`, seniorErr.message);
         // We don't throw here to avoid failing the whole registration if just the profile table fails
@@ -2306,13 +2312,13 @@ app.post('/register/volunteer', ensureAuth, async (req, res) => {
 // Register NGO: sets role=ngo_pending
 app.post('/register/ngo', ensureAuth, async (req, res) => {
   try {
-    const { 
-      ngo_name, 
-      registration_number, 
-      contact_person, 
-      phone, 
-      email, 
-      areas_of_operation, 
+    const {
+      ngo_name,
+      registration_number,
+      contact_person,
+      phone,
+      email,
+      areas_of_operation,
       services_offered,
       verification_documents
     } = req.body || {};
@@ -2359,11 +2365,11 @@ app.post('/register/ngo', ensureAuth, async (req, res) => {
         status: 'pending',
         updated_at: new Date().toISOString()
       };
-      
+
       const { error: ngoErr } = await supabase
         .from(TABLES.NGOS)
         .upsert(ngoProfile, { onConflict: 'user_id' });
-        
+
       if (ngoErr) {
         console.warn(`[WARN] Failed to save to ngos table:`, ngoErr.message);
       }
@@ -2388,7 +2394,7 @@ app.post('/register/ngo', ensureAuth, async (req, res) => {
 
     try {
       emitAdminUpdate({ type: 'ngo', action: 'applied', ngo: parseProfileData(data) });
-    } catch {}
+    } catch { }
 
     res.json({ profile: parseProfileData(data) });
   } catch (e) {
@@ -2423,8 +2429,8 @@ app.get('/ngo/me', ensureNgo, async (req, res) => {
     const regions = Array.isArray(u.ngo_regions)
       ? u.ngo_regions
       : Array.isArray(u.regions)
-      ? u.regions
-      : [];
+        ? u.regions
+        : [];
     res.json({
       ngo: {
         id: u.id,
@@ -2434,8 +2440,8 @@ app.get('/ngo/me', ensureNgo, async (req, res) => {
         serviceTypes: Array.isArray(u.ngo_service_types)
           ? u.ngo_service_types
           : Array.isArray(u.service_types)
-          ? u.service_types
-          : [],
+            ? u.service_types
+            : [],
         contactPerson: u.contact_person || u.contactPerson || null,
         phone: u.phone || null,
         email: u.email || null,
@@ -2478,7 +2484,7 @@ app.post('/admin/ngos/:id/profile-update/approve', ensureAdmin, async (req, res)
 
     try {
       await createAuditLog(req.user.id, 'ngo_profile_update_approve_requested', 'ngo', id, { requested_at: now });
-    } catch {}
+    } catch { }
 
     emitAdminUpdate({ type: 'ngo', action: 'profile_update_requested', ngo: updated });
     emitNgoUpdate({ ngoId: id, type: 'ngo', action: 'profile_update_requested', ngo: updated });
@@ -2508,7 +2514,7 @@ app.post('/admin/ngos/:id/profile-update/reject', ensureAdmin, async (req, res) 
 
     try {
       await createAuditLog(req.user.id, 'ngo_profile_update_reject_requested', 'ngo', id, { reason: String(reason || ''), requested_at: now });
-    } catch {}
+    } catch { }
 
     emitAdminUpdate({ type: 'ngo', action: 'profile_update_reject_requested', ngo: updated });
     emitNgoUpdate({ ngoId: id, type: 'ngo', action: 'profile_update_reject_requested', ngo: updated });
@@ -2524,8 +2530,8 @@ app.get('/ngo/dashboard', ensureNgo, async (req, res) => {
     const ngoRegions = Array.isArray(req.user.ngo_regions)
       ? req.user.ngo_regions
       : Array.isArray(req.user.regions)
-      ? req.user.regions
-      : [];
+        ? req.user.regions
+        : [];
     const regions = Array.isArray(ngoRegions) ? ngoRegions : [];
 
     const [escalatedRes, sosRes] = await Promise.all([
@@ -2538,7 +2544,7 @@ app.get('/ngo/dashboard', ensureNgo, async (req, res) => {
       supabase
         .from(TABLES.SOS_ALERTS)
         .select('id,senior_id,user_id,status')
-        .eq('status', 'active')
+        .in('status', ['active', 'open'])
         .order('created_at', { ascending: false })
         .limit(500),
     ]);
@@ -2557,7 +2563,7 @@ app.get('/ngo/dashboard', ensureNgo, async (req, res) => {
       try {
         const { data: seniors } = await supabase.from(TABLES.USERS).select('*').in('id', seniorIds);
         (seniors || []).forEach((u) => seniorsById.set(u.id, parseProfileData(u)));
-      } catch {}
+      } catch { }
     }
 
     const inRegion = (seniorId) => {
@@ -2585,7 +2591,7 @@ app.get('/ngo/dashboard', ensureNgo, async (req, res) => {
         const r = v.region || v.city || v.area;
         return r && regions.includes(r);
       }).length;
-    } catch {}
+    } catch { }
 
     res.json({
       overview: {
@@ -2636,8 +2642,8 @@ app.get('/ngo/requests', ensureNgo, async (req, res) => {
     const ngoRegions = Array.isArray(req.user.ngo_regions)
       ? req.user.ngo_regions
       : Array.isArray(req.user.regions)
-      ? req.user.regions
-      : [];
+        ? req.user.regions
+        : [];
     const regions = Array.isArray(ngoRegions) ? ngoRegions : [];
 
     const { data: allRequests, error } = await supabase
@@ -2692,7 +2698,7 @@ app.get('/ngo/requests', ensureNgo, async (req, res) => {
       try {
         const { data: seniors } = await supabase.from(TABLES.USERS).select('*').in('id', seniorIds);
         (seniors || []).map(parseProfileData).forEach((u) => seniorsById.set(u.id, u));
-      } catch {}
+      } catch { }
     }
 
     const inRegion = (seniorId) => {
@@ -2897,8 +2903,8 @@ app.get('/ngo/case-history', ensureNgo, async (req, res) => {
     const ngoRegions = Array.isArray(req.user.ngo_regions)
       ? req.user.ngo_regions
       : Array.isArray(req.user.regions)
-      ? req.user.regions
-      : [];
+        ? req.user.regions
+        : [];
     const regions = Array.isArray(ngoRegions) ? ngoRegions : [];
 
     let { data: requests, error } = await supabase
@@ -2931,7 +2937,7 @@ app.get('/ngo/case-history', ensureNgo, async (req, res) => {
       try {
         const { data: users } = await supabase.from(TABLES.USERS).select('*').in('id', allIds);
         (users || []).map(parseProfileData).forEach((u) => usersById.set(u.id, u));
-      } catch {}
+      } catch { }
     }
 
     const inRegion = (seniorId) => {
@@ -2964,8 +2970,8 @@ app.get('/ngo/volunteers', ensureNgo, async (req, res) => {
     const ngoRegions = Array.isArray(req.user.ngo_regions)
       ? req.user.ngo_regions
       : Array.isArray(req.user.regions)
-      ? req.user.regions
-      : [];
+        ? req.user.regions
+        : [];
     const regions = Array.isArray(ngoRegions) ? ngoRegions : [];
 
     const { data, error } = await supabase
@@ -3119,8 +3125,8 @@ app.get('/ngo/emergencies', ensureNgo, async (req, res) => {
     const ngoRegions = Array.isArray(req.user.ngo_regions)
       ? req.user.ngo_regions
       : Array.isArray(req.user.regions)
-      ? req.user.regions
-      : [];
+        ? req.user.regions
+        : [];
     const regions = Array.isArray(ngoRegions) ? ngoRegions : [];
 
     let query = supabase.from(TABLES.SOS_ALERTS).select('*');
@@ -3147,7 +3153,7 @@ app.get('/ngo/emergencies', ensureNgo, async (req, res) => {
       try {
         const { data: seniors } = await supabase.from(TABLES.USERS).select('*').in('id', seniorIds);
         (seniors || []).map(parseProfileData).forEach((u) => seniorsById.set(u.id, u));
-      } catch {}
+      } catch { }
     }
 
     const inRegion = (seniorId) => {
@@ -3237,7 +3243,7 @@ app.post('/ngo/profile/request-update', ensureNgo, async (req, res) => {
         status: 'pending',
         created_at: now,
       });
-    } catch {}
+    } catch { }
 
     emitAdminUpdate({ type: 'ngo', action: 'profile_update_requested', ngo: updated });
     emitNgoUpdate({ ngoId: req.user.id, type: 'ngo', action: 'profile_update_requested', ngo: updated });
@@ -3258,15 +3264,16 @@ app.post('/sos-alerts', ensureAuth, async (req, res) => {
     try {
       const { data: existingActive } = await supabase
         .from(TABLES.SOS_ALERTS)
-        .select('id,status')
+        .select('*')
         .eq('senior_id', req.user.id)
         .in('status', Array.from(SOS_ACTIVE_STATUSES))
         .order('created_at', { ascending: false })
         .limit(1);
       if (Array.isArray(existingActive) && existingActive.length > 0) {
-        return res.status(409).json({ error: 'An SOS is already active', existing: existingActive[0] });
+        console.log(`[SOS] Duplicate SOS from ${req.user.id}, returning existing active alert.`);
+        return res.status(200).json({ alert: existingActive[0], existing: true });
       }
-    } catch {}
+    } catch { }
 
     const location = extractLocationPayload(req.body || {});
 
@@ -3288,7 +3295,24 @@ app.post('/sos-alerts', ensureAuth, async (req, res) => {
         senior_id: req.user.id,
         message: String(message || ''),
         type: String(type || ''),
+        status: 'open',
+        created_at: now,
+        latitude: location?.lat,
+        longitude: location?.lng,
+        emergency_phones: Array.isArray(emergencyPhones) ? emergencyPhones.map((p) => normalizePhone(p)).filter(Boolean) : undefined,
+      },
+      {
+        senior_id: req.user.id,
+        message: String(message || ''),
+        type: String(type || ''),
         status: 'active',
+        created_at: now,
+      },
+      {
+        senior_id: req.user.id,
+        message: String(message || ''),
+        type: String(type || ''),
+        status: 'open',
         created_at: now,
       },
     ];
@@ -3302,8 +3326,8 @@ app.post('/sos-alerts', ensureAuth, async (req, res) => {
         error = null;
         break;
       }
-      // If undefined column, try next payload
-      if (resp.error?.code !== '42703') {
+      // If undefined column or status check constraint violation, try next payload
+      if (resp.error?.code !== '42703' && resp.error?.code !== '23514') {
         error = resp.error;
         break;
       }
@@ -3328,16 +3352,16 @@ app.post('/sos-alerts', ensureAuth, async (req, res) => {
     try {
       const resp = await supabase.from(TABLES.USERS).select('*').eq('id', req.user.id).single();
       if (!resp.error) senior = resp.data;
-    } catch {}
+    } catch { }
     const assignedNgoId = senior ? extractAssignedNgoIdForSenior(senior) : null;
     if (assignedNgoId) {
       try {
         io.to(`ngo:${assignedNgoId}`).emit('ngo:sos:new', { alert: data });
-      } catch {}
+      } catch { }
     }
 
     // Notify online approved volunteers
-    notifyOnlineVolunteersOfSos({ alert: data, senior }).catch(() => {});
+    notifyOnlineVolunteersOfSos({ alert: data, senior }).catch(() => { });
 
     // Auto-escalate if unhandled
     const autoEscSec = Number(process.env.SOS_ESCALATE_SECONDS || 60);
@@ -3350,7 +3374,7 @@ app.post('/sos-alerts', ensureAuth, async (req, res) => {
 
     try {
       await createAuditLog(req.user.id, 'sos_created', 'sos_alert', data?.id, { type: String(type || ''), location });
-    } catch {}
+    } catch { }
 
     res.status(201).json({ alert: data });
   } catch (e) {
@@ -3371,46 +3395,48 @@ app.post('/sos-alerts/:id/accept', ensureAuth, async (req, res) => {
     try {
       const resp = await supabase.from(TABLES.USERS).select('*').eq('id', req.user.id).single();
       if (!resp.error) volunteer = resp.data;
-    } catch {}
+    } catch { }
 
     if (!volunteer || !isApprovedVolunteerUser(volunteer)) {
       return res.status(403).json({ error: 'Only approved volunteers can accept SOS' });
     }
 
     const now = new Date().toISOString();
-    const { data, error } = await supabase
-      .from(TABLES.SOS_ALERTS)
-      .update({ status: 'accepted', volunteer_id: req.user.id, accepted_at: now })
-      .eq('id', id)
-      .eq('status', 'active')
-      .is('volunteer_id', null)
-      .select()
-      .maybeSingle();
-
-    if (error) {
-      // If schema doesn't have accepted_at, retry without it
-      if (error.code === '42703') {
-        const resp2 = await supabase
-          .from(TABLES.SOS_ALERTS)
-          .update({ status: 'accepted', volunteer_id: req.user.id })
-          .eq('id', id)
-          .eq('status', 'active')
-          .is('volunteer_id', null)
-          .select()
-          .maybeSingle();
-        if (resp2.error) throw resp2.error;
-        if (!resp2.data) return res.status(409).json({ error: 'SOS already accepted' });
-        clearSosEscalationTimer(id);
-        clearSosMultiStageTimers(id);
-        emitAdminUpdate({ type: 'sos_alert', action: 'accepted', alert: resp2.data });
-        emitNgoUpdate({ type: 'sos_alert', action: 'accepted', alert: resp2.data });
-        try {
-          await createAuditLog(req.user.id, 'sos_accepted', 'sos_alert', id, { at: now });
-        } catch {}
-        return res.json({ alert: resp2.data });
+    let data = null;
+    let error = null;
+    // Try DB-safe 'acknowledged' (matches check constraint)
+    const acceptPatches = [
+      { status: 'acknowledged', volunteer_id: req.user.id, acknowledged_at: now },
+      { status: 'acknowledged', volunteer_id: req.user.id },
+      // Last resort: DB schema might not allow these status values at all.
+      // In that case, only assign the volunteer (no status change) to avoid check constraint violations.
+      { volunteer_id: req.user.id, acknowledged_at: now },
+      { volunteer_id: req.user.id },
+    ];
+    for (const patch of acceptPatches) {
+      const resp = await supabase
+        .from(TABLES.SOS_ALERTS)
+        .update(patch)
+        .eq('id', id)
+        .in('status', ['active', 'open'])
+        .is('volunteer_id', null)
+        .select()
+        .maybeSingle();
+      if (!resp.error) {
+        data = resp.data;
+        error = null;
+        break;
       }
-      throw error;
+      // Retry on missing column or status check constraint violation
+      if (resp.error?.code === '42703' || resp.error?.code === '23514') {
+        error = resp.error;
+        continue;
+      }
+      error = resp.error;
+      break;
     }
+
+    if (error) throw error;
     if (!data) return res.status(409).json({ error: 'SOS already accepted' });
 
     clearSosEscalationTimer(id);
@@ -3423,11 +3449,11 @@ app.post('/sos-alerts/:id/accept', ensureAuth, async (req, res) => {
       const sid = data?.senior_id || data?.user_id;
       const socketId = sid ? userSockets.get(sid) : null;
       if (socketId) io.to(socketId).emit('sos:accepted', { alert: data, volunteerId: req.user.id });
-    } catch {}
+    } catch { }
 
     try {
       await createAuditLog(req.user.id, 'sos_accepted', 'sos_alert', id, { at: now });
-    } catch {}
+    } catch { }
 
     res.json({ alert: data });
   } catch (e) {
@@ -3449,8 +3475,12 @@ app.post('/sos-alerts/:id/status', ensureAuth, async (req, res) => {
     if (!existing) return res.status(404).json({ error: 'SOS not found' });
 
     const current = String(existing.status || '').toLowerCase();
-    if (next === 'in_progress' && current !== 'accepted') {
-      return res.status(400).json({ error: 'SOS must be accepted before in_progress' });
+    if (next === 'in_progress') {
+      // Some DB schemas don't store an intermediate 'accepted' state.
+      // Allow in_progress as long as a volunteer is assigned.
+      if (!existing.volunteer_id) {
+        return res.status(400).json({ error: 'SOS must be assigned before in_progress' });
+      }
     }
     if ((next === 'resolved' || next === 'closed') && !SOS_ACTIVE_STATUSES.has(current) && current !== 'resolved') {
       return res.status(400).json({ error: `Cannot set status from ${current}` });
@@ -3489,7 +3519,7 @@ app.post('/sos-alerts/:id/status', ensureAuth, async (req, res) => {
         emitNgoUpdate({ type: 'sos_alert', action: 'status_updated', alert: resp2.data });
         try {
           await createAuditLog(req.user.id, 'sos_status_updated', 'sos_alert', id, { from: current, to: next, at: now });
-        } catch {}
+        } catch { }
         return res.json({ alert: resp2.data });
       }
       throw error;
@@ -3503,7 +3533,7 @@ app.post('/sos-alerts/:id/status', ensureAuth, async (req, res) => {
     emitNgoUpdate({ type: 'sos_alert', action: 'status_updated', alert: data });
     try {
       await createAuditLog(req.user.id, 'sos_status_updated', 'sos_alert', id, { from: current, to: next, at: now });
-    } catch {}
+    } catch { }
     res.json({ alert: data });
   } catch (e) {
     console.error('[ERROR] Failed to update SOS status:', e);
@@ -3520,7 +3550,7 @@ app.get('/volunteer/sos-alerts', ensureAuth, async (req, res) => {
     try {
       const resp = await supabase.from(TABLES.USERS).select('*').eq('id', req.user.id).single();
       if (!resp.error) volunteer = resp.data;
-    } catch {}
+    } catch { }
 
     if (!volunteer || !isApprovedVolunteerUser(volunteer)) {
       return res.status(403).json({ error: 'Only approved volunteers can view SOS alerts' });
@@ -3534,7 +3564,7 @@ app.get('/volunteer/sos-alerts', ensureAuth, async (req, res) => {
     const st = String(status || 'active').toLowerCase();
     const wantStatuses = st === 'all'
       ? Array.from(SOS_ACTIVE_STATUSES)
-      : [st];
+      : (st === 'active' ? ['active', 'open'] : [st]);
 
     let q = supabase.from(TABLES.SOS_ALERTS).select('*').in('status', wantStatuses);
     const { data, error } = await q.order('created_at', { ascending: false }).limit(lim);
@@ -3547,7 +3577,7 @@ app.get('/volunteer/sos-alerts', ensureAuth, async (req, res) => {
       try {
         const { data: seniors } = await supabase.from(TABLES.USERS).select('*').in('id', seniorIds);
         (seniors || []).map(parseProfileData).forEach((u) => seniorsById.set(u.id, u));
-      } catch {}
+      } catch { }
     }
 
     const inRegion = (sid) => {
@@ -3575,13 +3605,94 @@ app.get('/volunteer/sos-alerts', ensureAuth, async (req, res) => {
   }
 });
 
+app.get('/admin/incidents', ensureAdmin, async (req, res) => {
+  try {
+    const { status = 'all', limit = 200, q = '' } = req.query || {};
+    const lim = Math.min(500, Math.max(1, Number(limit) || 200));
+    const search = String(q || '').trim().toLowerCase();
+
+    // parallel fetch sos + help requests?
+    // IncidentManagementScreen expects { incidents: [] }
+    // It maps them to common structure.
+
+    const [sosRes, helpRes] = await Promise.all([
+      supabase.from(TABLES.SOS_ALERTS).select('*').order('created_at', { ascending: false }).limit(lim),
+      status === 'all' || status === 'open' ? supabase.from(TABLES.HELP_REQUESTS).select('*').eq('status', 'escalated').limit(lim) : { data: [] }
+    ]);
+
+    const sos = (sosRes.data || []).map(s => ({
+      ...s,
+      type: s.type || 'SOS',
+      source: 'sos_alert',
+      priority: 'critical' // default for SOS
+    }));
+
+    // Enrich with senior/volunteer info if possible?
+    // Just fetch necessary user IDs
+    const userIds = new Set();
+    sos.forEach(s => {
+      if (s.senior_id) userIds.add(s.senior_id);
+      if (s.user_id) userIds.add(s.user_id);
+      if (s.volunteer_id) userIds.add(s.volunteer_id);
+    });
+
+    const help = (helpRes.data || []).map(h => ({
+      ...h,
+      type: 'Escalation', // Show escalated help requests as incidents
+      source: 'help_request',
+      senior_id: h.senior_id,
+      volunteer_id: h.volunteer_id,
+      priority: 'high'
+    }));
+    help.forEach(h => {
+      if (h.senior_id) userIds.add(h.senior_id);
+      if (h.volunteer_id) userIds.add(h.volunteer_id);
+    });
+
+    const userMap = new Map();
+    if (userIds.size > 0) {
+      const { data } = await supabase.from(TABLES.USERS).select('id,name,full_name,email,phone,role,avatar_emoji').in('id', Array.from(userIds));
+      (data || []).forEach(u => userMap.set(u.id, parseProfileData(u)));
+    }
+
+    const incidents = [...sos, ...help].map(i => {
+      const senior = userMap.get(i.senior_id || i.user_id);
+      const volunteer = userMap.get(i.volunteer_id);
+      return {
+        ...i,
+        senior: senior || { id: i.senior_id || i.user_id },
+        volunteer: volunteer || (i.volunteer_id ? { id: i.volunteer_id } : null),
+        assignee: volunteer ? (volunteer.name || volunteer.full_name) : null,
+        seniorName: senior ? (senior.name || senior.full_name) : null,
+        seniorPhone: senior ? (senior.phone) : null
+      };
+    }).sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+    if (search) {
+      const filtered = incidents.filter(i => {
+        const txt = JSON.stringify(i).toLowerCase();
+        return txt.includes(search);
+      });
+      return res.json({ incidents: filtered });
+    }
+
+    res.json({ incidents });
+  } catch (e) {
+    console.error('[ERROR] Failed to fetch incidents:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.get('/admin/sos-alerts', ensureAdmin, async (req, res) => {
   try {
     const { status = 'active', limit = 200 } = req.query || {};
     const lim = Math.min(500, Math.max(1, Number(limit) || 200));
     let q = supabase.from(TABLES.SOS_ALERTS).select('*');
     const st = String(status || 'active').toLowerCase();
-    if (st !== 'all') q = q.eq('status', st);
+    if (st !== 'all') {
+      if (st === 'active') q = q.in('status', ['active', 'open']);
+      else q = q.eq('status', st);
+    }
     const { data, error } = await q.order('created_at', { ascending: false }).limit(lim);
     if (error) throw error;
     res.json({ alerts: data || [] });
@@ -3600,8 +3711,10 @@ app.post('/admin/sos-alerts/:id/reassign', ensureAdmin, async (req, res) => {
 
     const now = new Date().toISOString();
     const attempts = [
-      { volunteer_id: vid, status: 'accepted', accepted_at: now, reassigned_by: req.user.id, reassigned_at: now },
-      { volunteer_id: vid, status: 'accepted' },
+      // Fix: forcing status update to acknowledged to ensure it shows as assigned
+      { volunteer_id: vid, status: 'acknowledged', acknowledged_at: now, reassigned_by: req.user.id, reassigned_at: now },
+      { volunteer_id: vid, status: 'acknowledged', acknowledged_at: now },
+      { volunteer_id: vid },
     ];
 
     let updated = null;
@@ -3615,7 +3728,7 @@ app.post('/admin/sos-alerts/:id/reassign', ensureAdmin, async (req, res) => {
         lastErr = null;
         break;
       }
-      if (resp.error?.code === '42703') {
+      if (resp.error?.code === '42703' || resp.error?.code === '23514') {
         lastErr = resp.error;
         continue;
       }
@@ -3628,17 +3741,18 @@ app.post('/admin/sos-alerts/:id/reassign', ensureAdmin, async (req, res) => {
     }
 
     clearSosEscalationTimer(id);
+    clearSosMultiStageTimers(id);
     emitAdminUpdate({ type: 'sos_alert', action: 'reassigned', alert: updated, volunteerId: vid });
     emitNgoUpdate({ type: 'sos_alert', action: 'reassigned', alert: updated, volunteerId: vid });
 
     try {
       await createAuditLog(req.user.id, 'sos_reassigned', 'sos_alert', id, { volunteerId: vid, at: now });
-    } catch {}
+    } catch { }
 
     try {
       const socketId = onlineVolunteers.get(vid);
       if (socketId) io.to(socketId).emit('sos:assigned', { alert: updated });
-    } catch {}
+    } catch { }
 
     res.json({ alert: updated });
   } catch (e) {
@@ -3683,7 +3797,7 @@ app.post('/admin/sos-alerts/:id/escalate', ensureAdmin, async (req, res) => {
     emitNgoUpdate({ type: 'sos_alert', action: 'escalated_to_superadmin', alert: updated });
     try {
       await createAuditLog(req.user.id, 'sos_escalated_to_superadmin', 'sos_alert', id, { reason: String(reason || ''), at: now });
-    } catch {}
+    } catch { }
 
     res.json({ alert: updated });
   } catch (e) {
@@ -3698,7 +3812,10 @@ app.get('/superadmin/sos-alerts', ensureSuperAdmin, async (req, res) => {
     const lim = Math.min(500, Math.max(1, Number(limit) || 200));
     let q = supabase.from(TABLES.SOS_ALERTS).select('*');
     const st = String(status || 'active').toLowerCase();
-    if (st !== 'all') q = q.eq('status', st);
+    if (st !== 'all') {
+      if (st === 'active') q = q.in('status', ['active', 'open']);
+      else q = q.eq('status', st);
+    }
     const { data, error } = await q.order('created_at', { ascending: false }).limit(lim);
     if (error) throw error;
     const rows = data || [];
@@ -3722,8 +3839,8 @@ app.post('/superadmin/sos-alerts/:id/force-assign', ensureSuperAdmin, async (req
     const now = new Date().toISOString();
 
     const attempts = [
-      { volunteer_id: vid, status: 'accepted', accepted_at: now },
-      { volunteer_id: vid, status: 'accepted' },
+      { volunteer_id: vid, status: 'acknowledged', acknowledged_at: now },
+      { volunteer_id: vid, status: 'acknowledged' },
     ];
     let updated = null;
     let lastErr = null;
@@ -3752,12 +3869,12 @@ app.post('/superadmin/sos-alerts/:id/force-assign', ensureSuperAdmin, async (req
 
     try {
       await createAuditLog(req.user.id, 'sos_force_assigned', 'sos_alert', id, { volunteerId: vid, at: now });
-    } catch {}
+    } catch { }
 
     try {
       const socketId = onlineVolunteers.get(vid);
       if (socketId) io.to(socketId).emit('sos:assigned', { alert: updated });
-    } catch {}
+    } catch { }
 
     res.json({ alert: updated });
   } catch (e) {
@@ -3801,7 +3918,7 @@ app.post('/superadmin/sos-alerts/:id/force-close', ensureSuperAdmin, async (req,
     emitNgoUpdate({ type: 'sos_alert', action: 'force_closed', alert: updated });
     try {
       await createAuditLog(req.user.id, 'sos_force_closed', 'sos_alert', id, { notes: String(notes || ''), at: now });
-    } catch {}
+    } catch { }
 
     res.json({ alert: updated });
   } catch (e) {
@@ -3819,9 +3936,9 @@ app.get('/volunteers/available', ensureAuth, async (req, res) => {
       .select('*')
       .eq('role', 'volunteer')
       .limit(50);
-    
+
     if (error) throw error;
-    
+
     // Filter to only include approved volunteers
     // Check both is_approved field and metadata.is_approved
     const approvedVolunteers = data
@@ -3836,7 +3953,7 @@ app.get('/volunteers/available', ensureAuth, async (req, res) => {
       })
       .filter(v => v.is_online === true)
       .slice(0, 20);
-    
+
     res.json({ volunteers: approvedVolunteers });
   } catch (e) {
     console.error(`[ERROR] Failed to fetch available volunteers:`, e);
@@ -3941,7 +4058,7 @@ app.get('/help-requests', ensureAuth, async (req, res) => {
       console.error(`[ERROR] Database query error:`, error);
       console.error(`[ERROR] Error code:`, error.code);
       console.error(`[ERROR] Error message:`, error.message);
-      
+
       // Check if table doesn't exist
       if (error.code === 'PGRST205' || error.message?.includes('Could not find the table') || error.message?.includes('relation') && error.message?.includes('does not exist')) {
         console.error('[ERROR] ========================================');
@@ -3950,26 +4067,26 @@ app.get('/help-requests', ensureAuth, async (req, res) => {
         console.error('[ERROR] Please create the table in Supabase using the SQL in:');
         console.error('[ERROR] File: server/SETUP_HELP_REQUESTS_TABLE.sql');
         console.error('[ERROR] ========================================');
-        return res.status(500).json({ 
+        return res.status(500).json({
           error: 'Database table not configured',
           code: 'TABLE_NOT_FOUND',
           message: 'help_requests table does not exist. Please run the SQL setup script in Supabase.',
           instructions: 'Run server/SETUP_HELP_REQUESTS_TABLE.sql in your Supabase SQL editor'
         });
       }
-      
+
       throw error;
     }
-    
+
     console.log(`[DEBUG] Query successful, found ${(requests || []).length} requests`);
     console.log(`[DEBUG] Requests data:`, requests);
-    
+
     // If no requests, return empty array with diagnostic info
     if (!requests || requests.length === 0) {
       console.log(`[DEBUG] No requests found (this is OK if no seniors have requested help yet)`);
       return res.json({ requests: [], message: 'No pending requests' });
     }
-    
+
     // Fetch senior data separately for each request
     const enrichedRequests = await Promise.all((requests || []).map(async (helpRequest) => {
       try {
@@ -3978,11 +4095,11 @@ app.get('/help-requests', ensureAuth, async (req, res) => {
           .select()
           .eq('id', helpRequest.senior_id)
           .single();
-        
+
         if (seniorError && seniorError.code !== 'PGRST116') {
           console.warn(`[WARN] Senior fetch error for ${helpRequest.senior_id}:`, seniorError);
         }
-        
+
         return {
           ...helpRequest,
           senior: senior ? parseProfileData(senior) : null
@@ -4007,9 +4124,9 @@ app.get('/help-requests', ensureAuth, async (req, res) => {
 app.put('/help-requests/:id/accept', ensureAuth, async (req, res) => {
   try {
     const { id } = req.params;
-    
+
     console.log(`[REQUEST] Accepting help request ${id} by volunteer ${req.user.id}`);
-    
+
     // First, fetch the request to verify it exists and is pending
     const { data: helpRequest, error: fetchError } = await supabase
       .from(TABLES.HELP_REQUESTS)
@@ -4045,11 +4162,11 @@ app.put('/help-requests/:id/accept', ensureAuth, async (req, res) => {
     }
 
     emitAdminUpdate({ type: 'help_request', action: 'accepted', request: updatedRequest });
-    
+
     const { senior_id: seniorId, category: requestType } = updatedRequest;
-    
+
     console.log(`[REQUEST] Successfully accepted by ${req.user.id}, creating conversation with ${seniorId}`);
-    
+
     // Get or create conversation
     let conversation;
     try {
@@ -4058,7 +4175,7 @@ app.put('/help-requests/:id/accept', ensureAuth, async (req, res) => {
         .select()
         .eq('senior_id', seniorId)
         .eq('companion_id', req.user.id);
-      
+
       if (existingConv && existingConv.length > 0) {
         conversation = existingConv[0];
         console.log(`[REQUEST] Using existing conversation ${conversation.id}`);
@@ -4070,7 +4187,7 @@ app.put('/help-requests/:id/accept', ensureAuth, async (req, res) => {
           .insert({ senior_id: seniorId, companion_id: req.user.id })
           .select()
           .single();
-        
+
         if (createError || !newConv) {
           console.warn(`[REQUEST] Failed to create conversation:`, createError);
           // Continue anyway - conversations table might not exist
@@ -4090,24 +4207,24 @@ app.put('/help-requests/:id/accept', ensureAuth, async (req, res) => {
       const convRoom = `conv:${conversation.id}`;
       const seniorSocketId = userSockets.get(seniorId);
       const volunteerSocketId = onlineVolunteers.get(req.user.id);
-      
+
       console.log(`[REQUEST] Wiring sockets to room ${convRoom}`);
       console.log(`[REQUEST] Senior ${seniorId} socket: ${seniorSocketId}`);
       console.log(`[REQUEST] Volunteer ${req.user.id} socket: ${volunteerSocketId}`);
-      
+
       if (seniorSocketId) io.sockets.sockets.get(seniorSocketId)?.join(convRoom);
       if (volunteerSocketId) io.sockets.sockets.get(volunteerSocketId)?.join(convRoom);
-      
+
       sessions.set(conversation.id, { seniorId, volunteerId: req.user.id });
 
       // Notify both parties via socket
-      const startedPayload = { 
-        conversationId: conversation.id, 
-        seniorId, 
+      const startedPayload = {
+        conversationId: conversation.id,
+        seniorId,
         volunteerId: req.user.id,
         requestType,
       };
-      
+
       // Send to senior - try direct socket first, then broadcast to all clients
       if (seniorSocketId) {
         io.to(seniorSocketId).emit('session:started', startedPayload);
@@ -4117,13 +4234,13 @@ app.put('/help-requests/:id/accept', ensureAuth, async (req, res) => {
         io.emit('session:started', startedPayload);
         console.warn(`[REQUEST] ⚠️  Senior ${seniorId} not in userSockets, broadcasting to all`);
       }
-      
+
       // Send to volunteer
       if (volunteerSocketId) {
         io.to(volunteerSocketId).emit('session:started', startedPayload);
         console.log(`[REQUEST] ✅ Notified volunteer ${req.user.id} via direct socket`);
       }
-      
+
       // Notify other volunteers
       onlineVolunteers.forEach((volSocketId, volId) => {
         if (volId !== req.user.id) {
@@ -4133,7 +4250,7 @@ app.put('/help-requests/:id/accept', ensureAuth, async (req, res) => {
     }
 
     // Return both the request and the conversation ID
-    res.json({ 
+    res.json({
       request: updatedRequest,
       conversation: { id: conversation.id },
       conversationId: conversation.id
@@ -4148,9 +4265,9 @@ app.put('/help-requests/:id/accept', ensureAuth, async (req, res) => {
 app.get('/conversations', ensureAuth, async (req, res) => {
   try {
     console.log(`[CONVERSATIONS] Fetching conversations for user ${req.user.id} (role: ${req.user.role})`);
-    
+
     let query = supabase.from(TABLES.CONVERSATIONS).select('*');
-    
+
     // Filter based on user role
     if (req.user.role === 'volunteer' || req.user.role === 'caregiver') {
       // Volunteers see conversations where they are the companion
@@ -4161,41 +4278,41 @@ app.get('/conversations', ensureAuth, async (req, res) => {
       query = query.eq('senior_id', req.user.id);
       console.log(`[CONVERSATIONS] Senior viewing their conversations`);
     }
-    
+
     const { data: conversations, error } = await query.order('last_message_at', { ascending: false, nullsFirst: false });
-    
+
     if (error) {
       console.error(`[ERROR] Conversations query error:`, error);
-      
+
       if (error.code === 'PGRST205' || error.message?.includes('Could not find the table')) {
         console.error('[ERROR] conversations table does not exist');
         return res.json({ conversations: [] });
       }
-      
+
       throw error;
     }
-    
+
     console.log(`[CONVERSATIONS] Found ${(conversations || []).length} conversations`);
-    
+
     if (!conversations || conversations.length === 0) {
       return res.json({ conversations: [] });
     }
-    
+
     // Fetch companion/senior data for each conversation
     const enrichedConversations = await Promise.all((conversations || []).map(async (conv) => {
       try {
         const companionId = req.user.role === 'volunteer' || req.user.role === 'caregiver' ? conv.senior_id : conv.companion_id;
-        
+
         const { data: user, error: userError } = await supabase
           .from(TABLES.USERS)
           .select()
           .eq('id', companionId)
           .single();
-        
+
         if (userError && userError.code !== 'PGRST116') {
           console.warn(`[WARN] User fetch error for ${companionId}:`, userError);
         }
-        
+
         return {
           ...conv,
           companion: user ? parseProfileData(user) : { id: companionId }
@@ -4208,7 +4325,7 @@ app.get('/conversations', ensureAuth, async (req, res) => {
         };
       }
     }));
-    
+
     console.log(`[CONVERSATIONS] Returning ${enrichedConversations.length} enriched conversations`);
     res.json({ conversations: enrichedConversations });
   } catch (e) {
@@ -4279,7 +4396,7 @@ app.get('/admin/volunteers/pending', ensureAdmin, async (req, res) => {
           return decision.status === 'pending';
         });
       }
-    } catch {}
+    } catch { }
 
     res.json({ volunteers: pending });
   } catch (e) {
@@ -4325,7 +4442,7 @@ app.get('/admin/volunteers/approved', ensureAdmin, async (req, res) => {
           return decision.status === 'approved';
         });
       }
-    } catch {}
+    } catch { }
 
     res.json({ volunteers: approvedVolunteers });
   } catch (e) {
@@ -4339,28 +4456,28 @@ app.post('/admin/volunteers/:id/approve', ensureAdmin, async (req, res) => {
   console.log(`[ADMIN] ========== APPROVAL REQUEST ==========`);
   console.log(`[ADMIN] Volunteer ID: ${id}`);
   console.log(`[ADMIN] Admin user:`, JSON.stringify(req.user, null, 2));
-  
+
   try {
     // Fetch current user to get metadata
     const { data: user, error: fetchError } = await supabase.from(TABLES.USERS).select('*').eq('id', id).single();
-    
+
     if (fetchError) {
       console.error(`[ADMIN] Error fetching user:`, fetchError);
       return res.status(404).json({ error: `Volunteer not found: ${fetchError.message}` });
     }
-    
+
     if (!user) {
       console.error(`[ADMIN] User not found with id: ${id}`);
       return res.status(404).json({ error: 'Volunteer not found' });
     }
-    
+
     console.log(`[ADMIN] Current user data:`, JSON.stringify(user, null, 2));
-    
+
     // Loosen validation: allow approval even if role drifted; we'll set correct role below
     if (user.role !== 'volunteer_pending' && user.role !== 'volunteer') {
       console.warn(`[ADMIN] Approving user ${id} from role ${user.role} -> volunteer`);
     }
-    
+
     let metadata = {};
     if (user.avatar_emoji) {
       if (typeof user.avatar_emoji === 'object') {
@@ -4373,7 +4490,7 @@ app.post('/admin/volunteers/:id/approve', ensureAdmin, async (req, res) => {
         }
       }
     }
-    
+
     // Update metadata with approved status
     metadata.is_approved = true;
     const updatedEmoji = JSON.stringify(metadata);
@@ -4388,7 +4505,7 @@ app.post('/admin/volunteers/:id/approve', ensureAdmin, async (req, res) => {
     // Update role, is_approved, metadata, and timestamp
     let { data, error } = await supabase
       .from(TABLES.USERS)
-      .update({ 
+      .update({
         role: 'volunteer',
         is_approved: true,
         avatar_emoji: updatedEmoji,
@@ -4397,16 +4514,16 @@ app.post('/admin/volunteers/:id/approve', ensureAdmin, async (req, res) => {
       .eq('id', id)
       .select()
       .single();
-      
+
     if (error) {
       console.error(`[ERROR] Primary update failed:`, error);
       console.error(`[ERROR] Error details:`, JSON.stringify(error, null, 2));
-      
+
       // Fallback: try without is_approved field (in case column doesn't exist)
       console.log(`[ADMIN] Attempting fallback update...`);
       const fallback = await supabase
         .from(TABLES.USERS)
-        .update({ 
+        .update({
           role: 'volunteer',
           avatar_emoji: updatedEmoji,
           updated_at: now
@@ -4414,23 +4531,23 @@ app.post('/admin/volunteers/:id/approve', ensureAdmin, async (req, res) => {
         .eq('id', id)
         .select()
         .single();
-      
+
       if (fallback.error) {
         console.error(`[ERROR] Fallback update also failed:`, fallback.error);
-        return res.status(500).json({ 
+        return res.status(500).json({
           error: `Failed to update volunteer: ${fallback.error.message}`,
           details: fallback.error
         });
       }
-      
+
       console.log(`[ADMIN] Fallback update succeeded`);
       data = fallback.data;
     } else {
       console.log(`[ADMIN] Primary update succeeded`);
     }
-    
+
     console.log(`[ADMIN] Updated user data:`, JSON.stringify(data, null, 2));
-    
+
     // Persist decision in pending_approvals (by uid)
     try {
       let upd = await supabase
@@ -4475,18 +4592,18 @@ app.post('/admin/volunteers/:id/approve', ensureAdmin, async (req, res) => {
     emitAdminUpdate({ type: 'user', action: 'volunteer_approved', user: parsedData });
     console.log(`[ADMIN] Returning parsed data:`, JSON.stringify(parsedData, null, 2));
     console.log(`[ADMIN] ========== APPROVAL SUCCESS ==========`);
-    
-    res.status(200).json({ 
-      volunteer: parsedData, 
-      success: true, 
-      message: 'Volunteer approved successfully' 
+
+    res.status(200).json({
+      volunteer: parsedData,
+      success: true,
+      message: 'Volunteer approved successfully'
     });
   } catch (e) {
     console.error(`[ERROR] ========== APPROVAL EXCEPTION ==========`);
     console.error(`[ERROR] Exception type:`, e.constructor.name);
     console.error(`[ERROR] Exception message:`, e.message);
     console.error(`[ERROR] Exception stack:`, e.stack);
-    res.status(500).json({ 
+    res.status(500).json({
       error: e.message || 'Internal server error',
       details: process.env.NODE_ENV === 'development' ? e.stack : undefined
     });
@@ -4499,11 +4616,11 @@ app.post('/admin/volunteers/:id/reject', ensureAdmin, async (req, res) => {
   try {
     // Fetch current user to get metadata
     const { data: user } = await supabase.from(TABLES.USERS).select('*').eq('id', id).single();
-    
+
     if (!user) {
       return res.status(404).json({ error: 'Volunteer not found' });
     }
-    
+
     let metadata = {};
     if (user.avatar_emoji) {
       if (typeof user.avatar_emoji === 'object') {
@@ -4516,7 +4633,7 @@ app.post('/admin/volunteers/:id/reject', ensureAdmin, async (req, res) => {
         }
       }
     }
-    
+
     // Update metadata with rejected status
     metadata.is_approved = false;
     const updatedEmoji = JSON.stringify(metadata);
@@ -4524,7 +4641,7 @@ app.post('/admin/volunteers/:id/reject', ensureAdmin, async (req, res) => {
 
     let { data, error } = await supabase
       .from(TABLES.USERS)
-      .update({ 
+      .update({
         role: 'volunteer_rejected',
         is_approved: false,
         avatar_emoji: updatedEmoji,
@@ -4533,12 +4650,12 @@ app.post('/admin/volunteers/:id/reject', ensureAdmin, async (req, res) => {
       .eq('id', id)
       .select()
       .single();
-      
+
     if (error) {
       console.warn(`[WARN] Combined rejection failed, trying role+metadata for ${id}:`, error.message);
       const fallback = await supabase
         .from(TABLES.USERS)
-        .update({ 
+        .update({
           role: 'volunteer_rejected',
           avatar_emoji: updatedEmoji,
           updated_at: now
@@ -4546,14 +4663,14 @@ app.post('/admin/volunteers/:id/reject', ensureAdmin, async (req, res) => {
         .eq('id', id)
         .select()
         .single();
-        
+
       if (fallback.error) {
         console.error(`[ERROR] Fallback rejection failed for ${id}:`, fallback.error);
         throw fallback.error;
       }
       data = fallback.data;
     }
-    
+
     console.log(`[ADMIN] Volunteer ${id} rejected successfully`);
     console.log(`[ADMIN] Updated data:`, JSON.stringify(data, null, 2));
 
@@ -4619,7 +4736,7 @@ app.get('/admin/stats', ensureAdmin, async (req, res) => {
       supabase.from(TABLES.USERS).select('*', { count: 'exact', head: true }).eq('role', 'ngo_rejected'),
       // Pending help requests
       supabase.from(TABLES.USERS).select('*', { count: 'exact', head: true }).eq('role', 'ngo_pending'),
-      supabase.from(TABLES.SOS_ALERTS).select('*', { count: 'exact', head: true }).eq('status', 'active'),
+      supabase.from(TABLES.SOS_ALERTS).select('*', { count: 'exact', head: true }).in('status', ['active', 'open']),
       supabase.from(TABLES.HELP_REQUESTS).select('*', { count: 'exact', head: true }).eq('status', 'completed'),
       // Best-effort resolved breakdown (depends on schema having volunteer_id)
       supabase.from(TABLES.HELP_REQUESTS).select('*', { count: 'exact', head: true }).eq('status', 'completed').is('volunteer_id', null),
@@ -4695,7 +4812,7 @@ app.get('/admin/incidents', ensureAdmin, async (req, res) => {
         status: 'open',
         createdAt: r.created_at,
       }));
-    } catch {}
+    } catch { }
 
     let sosIncidents = [];
     try {
@@ -4707,7 +4824,7 @@ app.get('/admin/incidents', ensureAdmin, async (req, res) => {
       if (error) throw error;
       sosIncidents = (sos || []).map((s) => {
         const st = String(s.status || '').toLowerCase();
-        const mappedStatus = st === 'active' ? 'open' : 'resolved';
+        const mappedStatus = (st === 'active' || st === 'open') ? 'open' : (st === 'accepted' || st === 'in_progress' ? 'in_progress' : 'resolved');
         return {
           source: 'sos_alert',
           id: s.id,
@@ -4719,7 +4836,7 @@ app.get('/admin/incidents', ensureAdmin, async (req, res) => {
           createdAt: s.created_at,
         };
       });
-    } catch {}
+    } catch { }
 
     const combined = [...helpIncidents, ...sosIncidents].sort((a, b) => {
       const ta = Date.parse(a.createdAt || '') || 0;
@@ -4736,7 +4853,7 @@ app.get('/admin/incidents', ensureAdmin, async (req, res) => {
           .select('*')
           .in('id', uniqueSeniorIds);
         (seniors || []).forEach((u) => seniorsById.set(u.id, parseProfileData(u)));
-      } catch {}
+      } catch { }
     }
 
     let incidents = combined.map((c) => ({
@@ -4819,7 +4936,7 @@ app.get('/admin/analytics', ensureAdmin, async (req, res) => {
         pending: countResults[2].count || 0,
         rejected: countResults[3].count || 0,
       };
-    } catch {}
+    } catch { }
 
     const weeklyData = Array.from(byDay.entries())
       .sort((a, b) => (a[0] < b[0] ? -1 : 1))
@@ -4878,7 +4995,7 @@ app.get('/admin/leaderboard/caregivers', ensureAdmin, async (req, res) => {
           .select('*')
           .in('id', volunteerIds);
         (users || []).forEach((u) => byId.set(u.id, parseProfileData(u)));
-      } catch {}
+      } catch { }
     }
 
     const leaders = ranked.map(([id, c]) => {
@@ -5106,7 +5223,7 @@ app.post('/admin/ngos/:id/verify', ensureAdmin, async (req, res) => {
     });
     try {
       await createAuditLog(req.user.id, 'ngo_docs_verified', 'ngo', id, { verified: !!verified, at: now });
-    } catch {}
+    } catch { }
     emitAdminUpdate({ type: 'ngo', action: !!verified ? 'docs_verified' : 'docs_unverified', ngo: updated });
     res.json({ ngo: updated, docsVerified: !!verified });
   } catch (e) {
@@ -5131,7 +5248,7 @@ app.post('/admin/ngos/:id/approve', ensureAdmin, async (req, res) => {
 
     try {
       await createAuditLog(req.user.id, 'ngo_approve_requested', 'ngo', id, { requested_at: now });
-    } catch {}
+    } catch { }
 
     emitAdminUpdate({ type: 'ngo', action: 'approval_requested', ngo: updated });
     res.json({ ngo: updated, queuedForSuperAdmin: true });
@@ -5158,7 +5275,7 @@ app.post('/admin/ngos/:id/reject', ensureAdmin, async (req, res) => {
 
     try {
       await createAuditLog(req.user.id, 'ngo_reject_requested', 'ngo', id, { reason: String(reason || ''), requested_at: now });
-    } catch {}
+    } catch { }
 
     emitAdminUpdate({ type: 'ngo', action: 'rejection_requested', ngo: updated });
     res.json({ ngo: updated, queuedForSuperAdmin: true });
@@ -5187,7 +5304,7 @@ app.post('/admin/ngos/:id/assign', ensureAdmin, async (req, res) => {
     });
     try {
       await createAuditLog(req.user.id, 'ngo_assign_requested', 'ngo', id, { ...payload, requested_at: now });
-    } catch {}
+    } catch { }
     emitAdminUpdate({ type: 'ngo', action: 'assign_requested', ngo: updated });
     res.json({ ngo: updated, queuedForSuperAdmin: true });
   } catch (e) {
@@ -5211,7 +5328,7 @@ app.post('/admin/ngos/:id/access', ensureAdmin, async (req, res) => {
     });
     try {
       await createAuditLog(req.user.id, 'ngo_access_requested', 'ngo', id, { enabled: !!enabled, requested_at: now });
-    } catch {}
+    } catch { }
     emitAdminUpdate({ type: 'ngo', action: 'access_requested', ngo: updated });
     res.json({ ngo: updated, queuedForSuperAdmin: true });
   } catch (e) {
@@ -5351,7 +5468,7 @@ app.get('/admin/risk', ensureAdmin, async (req, res) => {
         .limit(2000);
       if (error) throw error;
       moodLogs = data || [];
-    } catch {}
+    } catch { }
 
     const moodCounts = { happy: 0, okay: 0, sad: 0 };
     const sadBySenior = new Map();
@@ -5377,7 +5494,7 @@ app.get('/admin/risk', ensureAdmin, async (req, res) => {
         .limit(200);
       if (error) throw error;
       pending = data || [];
-    } catch {}
+    } catch { }
 
     pending.forEach((r) => {
       const sid = r.senior_id;
@@ -5400,7 +5517,7 @@ app.get('/admin/risk', ensureAdmin, async (req, res) => {
       try {
         const { data } = await supabase.from(TABLES.USERS).select('*').in('id', seniorIds);
         (data || []).forEach((u) => seniorsById.set(u.id, parseProfileData(u)));
-      } catch {}
+      } catch { }
     }
 
     const riskAlerts = ranked.map(([sid, score], idx) => {
@@ -5418,10 +5535,10 @@ app.get('/admin/risk', ensureAdmin, async (req, res) => {
     const totalMood = moodCounts.happy + moodCounts.okay + moodCounts.sad;
     const moodTrends = totalMood
       ? {
-          happy: Math.round((moodCounts.happy / totalMood) * 100),
-          okay: Math.round((moodCounts.okay / totalMood) * 100),
-          sad: Math.round((moodCounts.sad / totalMood) * 100),
-        }
+        happy: Math.round((moodCounts.happy / totalMood) * 100),
+        okay: Math.round((moodCounts.okay / totalMood) * 100),
+        sad: Math.round((moodCounts.sad / totalMood) * 100),
+      }
       : { happy: 0, okay: 0, sad: 0 };
 
     const riskCategories = {
@@ -5482,7 +5599,7 @@ app.get('/admin/activity', ensureAdmin, async (req, res) => {
 });
 
 const PORT = process.env.PORT || 4002;
-server.listen(PORT, () => {
+server.listen(PORT, '0.0.0.0', () => {
   console.log(`Saarthi backend listening on :${PORT}`);
 });
 

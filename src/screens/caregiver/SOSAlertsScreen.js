@@ -24,6 +24,7 @@ import { getSocket, identify } from '../../services/socketService';
 const SOSAlertsScreen = ({ navigation }) => {
   const [alerts, setAlerts] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [processingIds, setProcessingIds] = useState(() => new Set());
 
   const pulseAnim = useRef(new Animated.Value(1)).current;
 
@@ -56,7 +57,7 @@ const SOSAlertsScreen = ({ navigation }) => {
     const phone = senior?.phone || senior?.phoneNumber || senior?.mobile || '';
     const createdAt = row?.created_at || row?.createdAt;
     const statusRaw = String(row?.status || 'active').toLowerCase();
-    const status = statusRaw === 'accepted' || statusRaw === 'in_progress' ? 'acknowledged' : statusRaw;
+    const uiStatus = statusRaw === 'accepted' || statusRaw === 'in_progress' ? 'acknowledged' : statusRaw;
     const typeText = row?.type ? String(row.type) : 'SOS Emergency';
 
     const lat = row?.latitude;
@@ -73,7 +74,8 @@ const SOSAlertsScreen = ({ navigation }) => {
       time: formatTimeAgo(createdAt),
       location: locText,
       phone,
-      status,
+      status: uiStatus,
+      backendStatus: statusRaw,
       medicalInfo: senior?.medical_info || senior?.medicalInfo || '—',
       raw: row,
     };
@@ -119,6 +121,18 @@ const SOSAlertsScreen = ({ navigation }) => {
         }),
       ])
     ).start();
+
+    // Quick connectivity check so UI doesn't fail silently
+    (async () => {
+      try {
+        const resp = await fetch(`${API_BASE}/health`);
+        if (!resp.ok) {
+          Alert.alert('Backend issue', `Backend not reachable (status ${resp.status}).\n\nBackend: ${API_BASE}`);
+        }
+      } catch (e) {
+        Alert.alert('Backend issue', `Cannot reach backend.\n\nBackend: ${API_BASE}`);
+      }
+    })();
 
     loadAlerts();
 
@@ -179,55 +193,131 @@ const SOSAlertsScreen = ({ navigation }) => {
 
   useEffect(() => {
     // Vibrate for active SOS alerts
-    const activeAlerts = alerts.filter(a => a.status === 'active');
+    const activeAlerts = alerts.filter(a => String(a.backendStatus || a.status) === 'active');
     if (activeAlerts.length > 0) {
       Vibration.vibrate([500, 500, 500]);
     }
   }, [alerts]);
 
-  const handleAcknowledge = (alertId) => {
-    setAlerts(prev => 
-      prev.map(alert => 
-        alert.id === alertId 
-          ? { ...alert, status: 'acknowledged' }
-          : alert
-      )
-    );
+  const withProcessing = async (alertId, fn) => {
+    setProcessingIds((prev) => {
+      const next = new Set(prev);
+      next.add(String(alertId));
+      return next;
+    });
+    try {
+      return await fn();
+    } finally {
+      setProcessingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(String(alertId));
+        return next;
+      });
+    }
+  };
+
+  const acceptIfNeeded = async ({ alert, token }) => {
+    const st = String(alert?.backendStatus || alert?.status || '').toLowerCase();
+    if (st !== 'active') return { accepted: true, already: true };
+
+    const resp = await fetch(`${API_BASE}/sos-alerts/${alert.id}/accept`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (resp.ok) return { accepted: true, alert: data?.alert || null };
+    if (resp.status === 409) return { accepted: true, already: true };
+    if (resp.status === 401) return { accepted: false, auth: true, error: 'Unauthorized' };
+    return { accepted: false, error: data?.error || 'Failed to accept SOS' };
+  };
+
+  const updateStatus = async ({ alertId, token, status }) => {
+    const resp = await fetch(`${API_BASE}/sos-alerts/${alertId}/status`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (resp.ok) return { ok: true, alert: data?.alert || null };
+    if (resp.status === 401) return { ok: false, auth: true, error: 'Unauthorized' };
+    return { ok: false, error: data?.error || 'Failed to update SOS' };
+  };
+
+  const handleAcknowledge = async (alert) => {
+    await withProcessing(alert.id, async () => {
+      const token = await getTokenOrLogout();
+      if (!token) return;
+      const accepted = await acceptIfNeeded({ alert, token });
+      if (!accepted.accepted) throw new Error(accepted.error || 'Failed to accept SOS');
+
+      // UI acknowledge only (server state remains accepted)
+      setAlerts((prev) => prev.map((a) => (a.id === alert.id ? { ...a, status: 'acknowledged', backendStatus: a.backendStatus === 'active' ? 'accepted' : a.backendStatus } : a)));
+      await loadAlerts();
+    }).catch((e) => {
+      const msg = String(e?.message || 'Failed');
+      Alert.alert('Error', msg.includes('Network') ? `${msg}\n\nBackend: ${API_BASE}` : msg);
+    });
   };
 
   const handleRespond = async (alert) => {
-    // Accept/lock SOS first
-    try {
+    await withProcessing(alert.id, async () => {
       const token = await getTokenOrLogout();
       if (!token) return;
-      const resp = await fetch(`${API_BASE}/sos-alerts/${alert.id}/accept`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+
+      const accepted = await acceptIfNeeded({ alert, token });
+      if (!accepted.accepted) throw new Error(accepted.error || 'Failed to accept SOS');
+
+      // Mark in progress for better tracking
+      const st = await updateStatus({ alertId: alert.id, token, status: 'in_progress' });
+      if (!st.ok && !String(st?.error || '').includes('must be accepted')) {
+        // Don't hard-fail navigation if status update fails; accepting is the critical part.
+      }
+
+      await loadAlerts();
+
+      navigation.navigate('CaregiverInteraction', {
+        requestId: alert.id,
+        request: {
+          id: alert.id,
+          seniorName: alert.seniorName,
+          message: alert.raw?.message || 'SOS Emergency',
+          helpType: 'SOS',
+          description: alert.raw?.message || 'SOS Emergency',
+          senior: {
+            id: alert.seniorId,
+            name: alert.seniorName,
+            phone: alert.phone,
+            address: alert.location,
+            medicalInfo: alert.medicalInfo,
+          },
+          raw: alert.raw,
+        },
+        seniorId: alert.seniorId,
       });
-      const data = await resp.json();
-      if (!resp.ok) throw new Error(data?.error || 'Failed to accept SOS');
-      handleAcknowledge(alert.id);
-      Alert.alert('Accepted', 'You have accepted this SOS.');
-    } catch (e) {
-      Alert.alert('Error', e.message || 'Failed to accept SOS');
-    }
+    }).catch((e) => {
+      const msg = String(e?.message || 'Failed');
+      Alert.alert('Error', msg.includes('Network') ? `${msg}\n\nBackend: ${API_BASE}` : msg);
+    });
   };
 
-  const handleEscalate = async (alertId) => {
-    // Volunteer escalation maps to making SOS in_progress (or keep acknowledged) and rely on admin escalation timers.
-    try {
+  const handleEscalate = async (alert) => {
+    await withProcessing(alert.id, async () => {
       const token = await getTokenOrLogout();
       if (!token) return;
-      await fetch(`${API_BASE}/sos-alerts/${alertId}/status`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'in_progress' }),
-      });
-      setAlerts(prev => prev.map(a => (a.id === alertId ? { ...a, status: 'acknowledged' } : a)));
-      Alert.alert('Updated', 'Marked as in progress. Admin/NGO will be notified automatically if needed.');
-    } catch (e) {
-      Alert.alert('Error', e.message || 'Failed to update SOS');
-    }
+
+      // Ensure it's accepted (required by backend to move to in_progress)
+      const accepted = await acceptIfNeeded({ alert, token });
+      if (!accepted.accepted) throw new Error(accepted.error || 'Failed to accept SOS');
+
+      const st = await updateStatus({ alertId: alert.id, token, status: 'in_progress' });
+      if (!st.ok) throw new Error(st.error || 'Failed to update SOS');
+
+      await loadAlerts();
+      Alert.alert('Updated', 'Marked as in progress.');
+    }).catch((e) => {
+      const msg = String(e?.message || 'Failed');
+      Alert.alert('Error', msg.includes('Network') ? `${msg}\n\nBackend: ${API_BASE}` : msg);
+    });
   };
 
   const handleCall = async (phone) => {
@@ -393,7 +483,8 @@ const SOSAlertsScreen = ({ navigation }) => {
                   <View style={styles.alertActions}>
                     <TouchableOpacity 
                       style={[styles.actionBtn, styles.acknowledgeBtn]}
-                      onPress={() => handleAcknowledge(alert.id)}
+                      disabled={processingIds.has(String(alert.id))}
+                      onPress={() => handleAcknowledge(alert)}
                     >
                       <MaterialCommunityIcons
                         name="check"
@@ -405,6 +496,7 @@ const SOSAlertsScreen = ({ navigation }) => {
 
                     <TouchableOpacity 
                       style={[styles.actionBtn, styles.respondBtn]}
+                      disabled={processingIds.has(String(alert.id))}
                       onPress={() => handleRespond(alert)}
                     >
                       <MaterialCommunityIcons
@@ -417,7 +509,8 @@ const SOSAlertsScreen = ({ navigation }) => {
 
                     <TouchableOpacity 
                       style={[styles.actionBtn, styles.escalateBtn]}
-                      onPress={() => handleEscalate(alert.id)}
+                      disabled={processingIds.has(String(alert.id))}
+                      onPress={() => handleEscalate(alert)}
                     >
                       <MaterialCommunityIcons
                         name="arrow-up"
