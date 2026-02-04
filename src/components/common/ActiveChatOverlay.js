@@ -54,7 +54,11 @@ const ActiveChatOverlay = () => {
   };
 
   return (
-    <SafeAreaView style={[styles.container, Platform.OS === 'android' && styles.containerAndroid]}>
+    <SafeAreaView
+      style={[styles.container, Platform.OS === 'android' && styles.containerAndroid]}
+      accessibilityViewIsModal={expandedChats}
+      aria-modal={expandedChats}
+    >
       {expandedChats ? (
         // Expanded view - show all active chats
         <View style={styles.expandedContainer}>

@@ -1,19 +1,20 @@
 // Active Call Overlay - Shows ongoing calls similar to ActiveChatOverlay
 import React, { useEffect, useState } from 'react';
-import { 
-  View, 
-  Text, 
-  StyleSheet, 
+import {
+  View,
+  Text,
+  StyleSheet,
   TouchableOpacity,
   Animated,
+  Platform,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { colors, typography, spacing, borderRadius, shadows } from '../../theme';
 
-const ActiveCallOverlay = ({ 
-  visible, 
-  companionName, 
-  duration = 0, 
+const ActiveCallOverlay = ({
+  visible,
+  companionName,
+  duration = 0,
   onTap,
   onEnd,
 }) => {
@@ -38,13 +39,13 @@ const ActiveCallOverlay = ({
       Animated.timing(slideAnim, {
         toValue: 0,
         duration: 300,
-        useNativeDriver: true,
+        useNativeDriver: Platform.OS !== 'web',
       }).start();
     } else {
       Animated.timing(slideAnim, {
         toValue: -150,
         duration: 300,
-        useNativeDriver: true,
+        useNativeDriver: Platform.OS !== 'web',
       }).start();
     }
   }, [visible]);

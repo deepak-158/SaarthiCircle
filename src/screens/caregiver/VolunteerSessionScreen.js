@@ -1,6 +1,6 @@
 // Volunteer Session Screen - brings a volunteer online and waits for a match
 import React, { useEffect, useState, useRef } from 'react';
-import { View, Text, SafeAreaView, StyleSheet, TouchableOpacity, ActivityIndicator, Animated } from 'react-native';
+import { View, Text, SafeAreaView, StyleSheet, TouchableOpacity, ActivityIndicator, Animated, Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { colors, spacing, typography, borderRadius, shadows } from '../../theme';
@@ -29,7 +29,7 @@ const VolunteerSessionScreen = ({ navigation }) => {
         const profile = profileJson ? JSON.parse(profileJson) : null;
         const id = profile?.id || profile?.uid || profile?.userId;
         setUserId(id);
-      } catch {}
+      } catch { }
     })();
   }, []);
 
@@ -72,8 +72,8 @@ const VolunteerSessionScreen = ({ navigation }) => {
     if (isOnline) {
       Animated.loop(
         Animated.sequence([
-          Animated.timing(pulseAnim, { toValue: 1.1, duration: 900, useNativeDriver: true }),
-          Animated.timing(pulseAnim, { toValue: 1, duration: 900, useNativeDriver: true }),
+          Animated.timing(pulseAnim, { toValue: 1.1, duration: 900, useNativeDriver: Platform.OS !== 'web' }),
+          Animated.timing(pulseAnim, { toValue: 1, duration: 900, useNativeDriver: Platform.OS !== 'web' }),
         ])
       ).start();
     }
@@ -103,7 +103,7 @@ const VolunteerSessionScreen = ({ navigation }) => {
     <SafeAreaView style={styles.safeArea}>
       {/* Active Chat Overlay */}
       <ActiveChatOverlay navigation={navigation} activeChats={activeChats} />
-      
+
       <View style={styles.container}>
         <View style={styles.header}>
           <MaterialCommunityIcons name="account-heart" size={48} color={colors.primary.main} />

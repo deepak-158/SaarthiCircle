@@ -1,9 +1,9 @@
 // Caregiver Interaction Screen
 import React, { useState } from 'react';
-import { 
-  View, 
-  Text, 
-  StyleSheet, 
+import {
+  View,
+  Text,
+  StyleSheet,
   SafeAreaView,
   ScrollView,
   TouchableOpacity,
@@ -24,7 +24,7 @@ const CaregiverInteractionScreen = ({ navigation, route }) => {
   const { requestId, request, conversationId, seniorId } = route.params || {};
 
   const { removeActiveChat } = useChat();
-  
+
   const [notes, setNotes] = useState('');
   const [status, setStatus] = useState('in_progress');
 
@@ -51,10 +51,10 @@ const CaregiverInteractionScreen = ({ navigation, route }) => {
 
   const handleCall = () => {
     const phoneNumber = seniorDetails.phone.replace(/\s/g, '');
-    const phoneUrl = Platform.OS === 'ios' 
-      ? `telprompt:${phoneNumber}` 
+    const phoneUrl = Platform.OS === 'ios'
+      ? `telprompt:${phoneNumber}`
       : `tel:${phoneNumber}`;
-    
+
     Linking.canOpenURL(phoneUrl)
       .then(supported => {
         if (supported) {
@@ -72,7 +72,7 @@ const CaregiverInteractionScreen = ({ navigation, route }) => {
   const handleChat = () => {
     // Open WhatsApp or SMS
     const phoneNumber = seniorDetails.phone.replace(/\s/g, '').replace('+', '');
-    
+
     Alert.alert(
       'Chat with Senior',
       'Choose how you want to message:',
@@ -112,7 +112,7 @@ const CaregiverInteractionScreen = ({ navigation, route }) => {
             const smsUrl = Platform.OS === 'ios'
               ? `sms:${seniorDetails.phone}`
               : `sms:${seniorDetails.phone}?body=Hello from SaathiCircle volunteer`;
-            Linking.openURL(smsUrl).catch(err => 
+            Linking.openURL(smsUrl).catch(err =>
               Alert.alert('Error', 'Could not open messaging app')
             );
           }
@@ -124,7 +124,7 @@ const CaregiverInteractionScreen = ({ navigation, route }) => {
 
   const handleLocation = () => {
     const address = encodeURIComponent(seniorDetails.address);
-    
+
     Alert.alert(
       'Open Location',
       'Choose maps app:',
@@ -135,7 +135,7 @@ const CaregiverInteractionScreen = ({ navigation, route }) => {
             const googleMapsUrl = Platform.OS === 'ios'
               ? `comgooglemaps://?q=${address}`
               : `geo:0,0?q=${address}`;
-            
+
             Linking.canOpenURL(googleMapsUrl)
               .then(supported => {
                 if (supported) {
@@ -180,16 +180,24 @@ const CaregiverInteractionScreen = ({ navigation, route }) => {
 
       if (resolvedRequestId && !resolvedRequestId.toString().startsWith('dummy')) {
         const token = await AsyncStorage.getItem('userToken');
-        const resp = await fetch(`${API_BASE}/help-requests/${resolvedRequestId}/complete`, {
-          method: 'PUT',
-          headers: { 'Authorization': `Bearer ${token}` }
+        const isSOS = request?.helpType === 'SOS' || request?.type === 'SOS';
+        const endpoint = isSOS
+          ? `${API_BASE}/sos-alerts/${resolvedRequestId}/resolve`
+          : `${API_BASE}/help-requests/${resolvedRequestId}/complete`;
+
+        const method = isSOS ? 'POST' : 'PUT';
+
+        const resp = await fetch(endpoint, {
+          method,
+          headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: isSOS ? JSON.stringify({ notes: notes || 'Resolved by volunteer' }) : undefined
         });
         if (!resp.ok) {
           let message = 'Failed to resolve request';
           try {
             const errJson = await resp.json();
             if (errJson?.error) message = errJson.error;
-          } catch {}
+          } catch { }
           throw new Error(message);
         }
       }
@@ -228,7 +236,7 @@ const CaregiverInteractionScreen = ({ navigation, route }) => {
         } else {
           await AsyncStorage.setItem('lastResolvedRequestId', String(resolvedRequestId));
         }
-      } catch {}
+      } catch { }
     };
 
     try {
@@ -318,13 +326,20 @@ const CaregiverInteractionScreen = ({ navigation, route }) => {
           const parsed = existing ? JSON.parse(existing) : [];
           const next = Array.from(new Set([...(Array.isArray(parsed) ? parsed : []), String(resolvedRequestId)]));
           await AsyncStorage.setItem('dummyResolvedIds', JSON.stringify(next));
-        } catch {}
+        } catch { }
         return;
       }
 
       const token = await AsyncStorage.getItem('userToken');
-      const resp = await fetch(`${API_BASE}/help-requests/${resolvedRequestId}/escalate`, {
-        method: 'PUT',
+      const isSOS = request?.helpType === 'SOS' || request?.type === 'SOS';
+      const endpoint = isSOS
+        ? `${API_BASE}/sos-alerts/${resolvedRequestId}/escalate`
+        : `${API_BASE}/help-requests/${resolvedRequestId}/escalate`;
+
+      const method = isSOS ? 'POST' : 'PUT';
+
+      const resp = await fetch(endpoint, {
+        method,
         headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ reason: reason || '' })
       });
@@ -333,7 +348,7 @@ const CaregiverInteractionScreen = ({ navigation, route }) => {
         try {
           const errJson = await resp.json();
           if (errJson?.error) message = errJson.error;
-        } catch {}
+        } catch { }
         throw new Error(message);
       }
     };
@@ -381,7 +396,7 @@ const CaregiverInteractionScreen = ({ navigation, route }) => {
     <SafeAreaView style={styles.safeArea}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity 
+        <TouchableOpacity
           onPress={() => navigation.goBack()}
           style={styles.backButton}
         >
@@ -401,7 +416,7 @@ const CaregiverInteractionScreen = ({ navigation, route }) => {
         </TouchableOpacity>
       </View>
 
-      <ScrollView 
+      <ScrollView
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
       >
@@ -426,7 +441,7 @@ const CaregiverInteractionScreen = ({ navigation, route }) => {
 
           {/* Quick Actions */}
           <View style={styles.quickActions}>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={[styles.actionButton, styles.callAction]}
               onPress={handleCall}
             >
@@ -438,7 +453,7 @@ const CaregiverInteractionScreen = ({ navigation, route }) => {
               <Text style={styles.actionText}>Call</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity 
+            <TouchableOpacity
               style={[styles.actionButton, styles.chatAction]}
               onPress={handleChat}
             >
@@ -450,7 +465,7 @@ const CaregiverInteractionScreen = ({ navigation, route }) => {
               <Text style={styles.actionText}>Chat</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity 
+            <TouchableOpacity
               style={[styles.actionButton, styles.mapAction]}
               onPress={handleLocation}
             >
@@ -467,7 +482,7 @@ const CaregiverInteractionScreen = ({ navigation, route }) => {
         {/* Help Request Details */}
         <View style={[styles.detailsCard, shadows.sm]}>
           <Text style={styles.sectionTitle}>Help Request</Text>
-          
+
           <View style={styles.detailRow}>
             <MaterialCommunityIcons
               name="help-circle"
@@ -496,7 +511,7 @@ const CaregiverInteractionScreen = ({ navigation, route }) => {
         {/* Contact Information */}
         <View style={[styles.detailsCard, shadows.sm]}>
           <Text style={styles.sectionTitle}>Contact Information</Text>
-          
+
           <View style={styles.detailRow}>
             <MaterialCommunityIcons
               name="phone"
@@ -591,7 +606,7 @@ const CaregiverInteractionScreen = ({ navigation, route }) => {
             style={styles.resolveButton}
           />
 
-          <TouchableOpacity 
+          <TouchableOpacity
             style={styles.escalateButton}
             onPress={handleEscalate}
           >

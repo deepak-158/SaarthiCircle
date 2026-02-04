@@ -1,12 +1,13 @@
 // Incoming Call Overlay - Shows incoming call notification for volunteers
 import React, { useEffect, useState } from 'react';
-import { 
-  View, 
-  Text, 
-  StyleSheet, 
+import {
+  View,
+  Text,
+  StyleSheet,
   TouchableOpacity,
   Animated,
   Modal,
+  Platform,
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { colors, typography, spacing, borderRadius, shadows } from '../../theme';
@@ -21,7 +22,7 @@ const IncomingCallOverlay = ({ visible, callerName, onAccept, onReject, isLoadin
       Animated.timing(scaleAnim, {
         toValue: 1,
         duration: 300,
-        useNativeDriver: true,
+        useNativeDriver: Platform.OS !== 'web',
       }).start();
 
       // Pulsing ring animation
@@ -30,12 +31,12 @@ const IncomingCallOverlay = ({ visible, callerName, onAccept, onReject, isLoadin
           Animated.timing(ringAnim, {
             toValue: 1,
             duration: 600,
-            useNativeDriver: true,
+            useNativeDriver: Platform.OS !== 'web',
           }),
           Animated.timing(ringAnim, {
             toValue: 0,
             duration: 600,
-            useNativeDriver: true,
+            useNativeDriver: Platform.OS !== 'web',
           }),
         ])
       ).start();
@@ -63,7 +64,7 @@ const IncomingCallOverlay = ({ visible, callerName, onAccept, onReject, isLoadin
       hardwareAccelerated={true}
     >
       <View style={styles.overlay}>
-        <Animated.View 
+        <Animated.View
           style={[
             styles.container,
             { transform: [{ scale: scaleAnim }] }

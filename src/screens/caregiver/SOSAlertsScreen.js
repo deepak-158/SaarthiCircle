@@ -1,9 +1,9 @@
 // SOS Alerts Screen for Caregivers
 import React, { useState, useEffect, useRef } from 'react';
-import { 
-  View, 
-  Text, 
-  StyleSheet, 
+import {
+  View,
+  Text,
+  StyleSheet,
   SafeAreaView,
   ScrollView,
   TouchableOpacity,
@@ -57,7 +57,7 @@ const SOSAlertsScreen = ({ navigation }) => {
     const phone = senior?.phone || senior?.phoneNumber || senior?.mobile || '';
     const createdAt = row?.created_at || row?.createdAt;
     const statusRaw = String(row?.status || 'active').toLowerCase();
-    const uiStatus = statusRaw === 'accepted' || statusRaw === 'in_progress' ? 'acknowledged' : statusRaw;
+    const uiStatus = statusRaw === 'accepted' || statusRaw === 'in_progress' || statusRaw === 'acknowledged' ? 'acknowledged' : statusRaw;
     const typeText = row?.type ? String(row.type) : 'SOS Emergency';
 
     const lat = row?.latitude;
@@ -112,12 +112,12 @@ const SOSAlertsScreen = ({ navigation }) => {
         Animated.timing(pulseAnim, {
           toValue: 1.1,
           duration: 500,
-          useNativeDriver: true,
+          useNativeDriver: Platform.OS !== 'web',
         }),
         Animated.timing(pulseAnim, {
           toValue: 1,
           duration: 500,
-          useNativeDriver: true,
+          useNativeDriver: Platform.OS !== 'web',
         }),
       ])
     ).start();
@@ -155,7 +155,7 @@ const SOSAlertsScreen = ({ navigation }) => {
               return [incoming, ...prev];
             });
             Vibration.vibrate([300, 200, 300]);
-          } catch {}
+          } catch { }
         };
         const onAssigned = (payload) => {
           try {
@@ -168,13 +168,19 @@ const SOSAlertsScreen = ({ navigation }) => {
               return next;
             });
             Vibration.vibrate([300, 200, 300]);
-          } catch {}
+          } catch { }
         };
 
         socket.off('sos:new');
         socket.off('sos:assigned');
         socket.on('sos:new', onNew);
         socket.on('sos:assigned', onAssigned);
+
+        // Re-identify on reconnect (fixes issue where server restart wipes online list)
+        socket.on('connect', () => {
+          console.log('[SOS] Socket reconnected, re-identifying...');
+          identify({ userId, role: 'VOLUNTEER' });
+        });
       } catch (e) {
         // ignore
       }
@@ -187,7 +193,7 @@ const SOSAlertsScreen = ({ navigation }) => {
         const socket = getSocket();
         socket.off('sos:new');
         socket.off('sos:assigned');
-      } catch {}
+      } catch { }
     };
   }, []);
 
@@ -250,8 +256,8 @@ const SOSAlertsScreen = ({ navigation }) => {
       const accepted = await acceptIfNeeded({ alert, token });
       if (!accepted.accepted) throw new Error(accepted.error || 'Failed to accept SOS');
 
-      // UI acknowledge only (server state remains accepted)
-      setAlerts((prev) => prev.map((a) => (a.id === alert.id ? { ...a, status: 'acknowledged', backendStatus: a.backendStatus === 'active' ? 'accepted' : a.backendStatus } : a)));
+      // UI acknowledge only (server state remains accepted/acknowledged)
+      setAlerts((prev) => prev.map((a) => (a.id === alert.id ? { ...a, status: 'acknowledged', backendStatus: 'acknowledged' } : a)));
       await loadAlerts();
     }).catch((e) => {
       const msg = String(e?.message || 'Failed');
@@ -309,11 +315,19 @@ const SOSAlertsScreen = ({ navigation }) => {
       const accepted = await acceptIfNeeded({ alert, token });
       if (!accepted.accepted) throw new Error(accepted.error || 'Failed to accept SOS');
 
-      const st = await updateStatus({ alertId: alert.id, token, status: 'in_progress' });
-      if (!st.ok) throw new Error(st.error || 'Failed to update SOS');
+      const resp = await fetch(`${API_BASE}/sos-alerts/${alert.id}/escalate`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason: 'Escalated by Volunteer' }),
+      });
+
+      if (!resp.ok) {
+        const d = await resp.json().catch(() => ({}));
+        throw new Error(d.error || 'Failed to escalate SOS');
+      }
 
       await loadAlerts();
-      Alert.alert('Updated', 'Marked as in progress.');
+      Alert.alert('Escalated', 'SOS Alert has been escalated to Admins.');
     }).catch((e) => {
       const msg = String(e?.message || 'Failed');
       Alert.alert('Error', msg.includes('Network') ? `${msg}\n\nBackend: ${API_BASE}` : msg);
@@ -367,13 +381,13 @@ const SOSAlertsScreen = ({ navigation }) => {
     }
   };
 
-  const activeCount = alerts.filter(a => a.status === 'active').length;
+  const activeCount = alerts.filter(a => a.status === 'active' || a.status === 'acknowledged').length;
 
   return (
     <SafeAreaView style={styles.safeArea}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity 
+        <TouchableOpacity
           onPress={() => navigation.goBack()}
           style={styles.backButton}
         >
@@ -385,7 +399,7 @@ const SOSAlertsScreen = ({ navigation }) => {
         </TouchableOpacity>
         <Text style={styles.headerTitle}>SOS Alerts</Text>
         {activeCount > 0 && (
-          <Animated.View 
+          <Animated.View
             style={[
               styles.activeBadge,
               { transform: [{ scale: pulseAnim }] }
@@ -414,18 +428,18 @@ const SOSAlertsScreen = ({ navigation }) => {
         </View>
       </View>
 
-      <ScrollView 
+      <ScrollView
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
       >
         {/* Active SOS Alerts */}
-        {alerts.filter(a => a.status === 'active').length > 0 && (
+        {alerts.filter(a => a.status === 'active' || a.status === 'acknowledged').length > 0 && (
           <>
             <Text style={styles.sectionHeader}>⚠️ ACTIVE EMERGENCIES</Text>
             {alerts
-              .filter(a => a.status === 'active')
+              .filter(a => a.status === 'active' || a.status === 'acknowledged')
               .map(alert => (
-                <Animated.View 
+                <Animated.View
                   key={alert.id}
                   style={[
                     styles.alertCard,
@@ -449,7 +463,7 @@ const SOSAlertsScreen = ({ navigation }) => {
                       <Text style={styles.alertType}>{alert.type}</Text>
                       <Text style={styles.alertTime}>{alert.time}</Text>
                     </View>
-                    <TouchableOpacity 
+                    <TouchableOpacity
                       style={styles.callButton}
                       onPress={() => handleCall(alert.phone)}
                     >
@@ -481,20 +495,22 @@ const SOSAlertsScreen = ({ navigation }) => {
                   </View>
 
                   <View style={styles.alertActions}>
-                    <TouchableOpacity 
-                      style={[styles.actionBtn, styles.acknowledgeBtn]}
-                      disabled={processingIds.has(String(alert.id))}
-                      onPress={() => handleAcknowledge(alert)}
-                    >
-                      <MaterialCommunityIcons
-                        name="check"
-                        size={20}
-                        color={colors.neutral.white}
-                      />
-                      <Text style={styles.actionBtnText}>Acknowledge</Text>
-                    </TouchableOpacity>
+                    {alert.status !== 'acknowledged' && (
+                      <TouchableOpacity
+                        style={[styles.actionBtn, styles.acknowledgeBtn]}
+                        disabled={processingIds.has(String(alert.id))}
+                        onPress={() => handleAcknowledge(alert)}
+                      >
+                        <MaterialCommunityIcons
+                          name="check"
+                          size={20}
+                          color={colors.neutral.white}
+                        />
+                        <Text style={styles.actionBtnText}>Acknowledge</Text>
+                      </TouchableOpacity>
+                    )}
 
-                    <TouchableOpacity 
+                    <TouchableOpacity
                       style={[styles.actionBtn, styles.respondBtn]}
                       disabled={processingIds.has(String(alert.id))}
                       onPress={() => handleRespond(alert)}
@@ -507,7 +523,7 @@ const SOSAlertsScreen = ({ navigation }) => {
                       <Text style={styles.actionBtnText}>Respond</Text>
                     </TouchableOpacity>
 
-                    <TouchableOpacity 
+                    <TouchableOpacity
                       style={[styles.actionBtn, styles.escalateBtn]}
                       disabled={processingIds.has(String(alert.id))}
                       onPress={() => handleEscalate(alert)}
@@ -528,13 +544,13 @@ const SOSAlertsScreen = ({ navigation }) => {
         )}
 
         {/* Other Alerts */}
-        {alerts.filter(a => a.status !== 'active').length > 0 && (
+        {alerts.filter(a => a.status !== 'active' && a.status !== 'acknowledged').length > 0 && (
           <>
             <Text style={styles.sectionHeader}>Other Alerts</Text>
             {alerts
-              .filter(a => a.status !== 'active')
+              .filter(a => a.status !== 'active' && a.status !== 'acknowledged')
               .map(alert => (
-                <View 
+                <View
                   key={alert.id}
                   style={[styles.alertCard, shadows.sm]}
                 >
@@ -577,7 +593,7 @@ const SOSAlertsScreen = ({ navigation }) => {
                     </View>
                   </View>
 
-                  <TouchableOpacity 
+                  <TouchableOpacity
                     style={styles.viewDetailsBtn}
                     onPress={() => handleRespond(alert)}
                   >

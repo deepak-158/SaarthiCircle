@@ -43,7 +43,7 @@ const emitNgoUpdate = ({ ngoId, ...payload } = {}) => {
 
 const sosEscalationTimers = new Map(); // sosId -> timeoutId
 
-const SOS_ACTIVE_STATUSES = new Set(['active', 'open', 'accepted', 'in_progress']);
+const SOS_ACTIVE_STATUSES = new Set(['active', 'open', 'accepted', 'in_progress', 'acknowledged', 'escalated']);
 
 const clearSosEscalationTimer = (sosId) => {
   try {
@@ -229,25 +229,46 @@ const notifyOnlineVolunteersOfSos = async ({ alert, senior }) => {
     if (!sid) return;
     const s = senior ? parseProfileData(senior) : null;
     const seniorRegion = s?.region || s?.city || s?.area || null;
-    if (onlineVolunteers.size === 0) return;
+    console.log(`[SOS-DEBUG] Notify attempt. SeniorId: ${sid}, Region: ${seniorRegion}, OnlineVols: ${onlineVolunteers.size}`);
+
+    if (onlineVolunteers.size === 0) {
+      console.log('[SOS-DEBUG] No online volunteers to notify.');
+      return;
+    }
 
     const volunteerIds = Array.from(onlineVolunteers.keys());
+    console.log(`[SOS-DEBUG] Checking volunteers: ${volunteerIds.join(', ')}`);
+
     const { data: vols } = await supabase.from(TABLES.USERS).select('*').in('id', volunteerIds);
     const parsed = (vols || []).map(parseProfileData);
+
     const eligible = parsed.filter((v) => {
-      if (!isApprovedVolunteerUser(v)) return false;
-      if (v.is_online !== true) return false;
-      if (!seniorRegion) return true;
-      const vr = v.region || v.city || v.area || null;
-      return vr ? vr === seniorRegion : true;
+      const isApproved = isApprovedVolunteerUser(v);
+      const isOnline = v.is_online === true;
+      let regionMatch = true;
+      if (seniorRegion) {
+        const vr = v.region || v.city || v.area || null;
+        regionMatch = vr ? vr === seniorRegion : true;
+      }
+
+      if (!isApproved || !isOnline || !regionMatch) {
+        console.log(`[SOS-DEBUG] Vol ${v.id} skipped. Approved: ${isApproved}, Online: ${isOnline}, RegionMatch: ${regionMatch} (S:${seniorRegion} V:${v.region || v.city})`);
+        return false;
+      }
+      return true;
     });
+
+    console.log(`[SOS-DEBUG] Eligible volunteers: ${eligible.length}`);
 
     eligible.forEach((v) => {
       const socketId = onlineVolunteers.get(v.id);
       if (!socketId) return;
+      console.log(`[SOS-DEBUG] Emitting sos:new to Vol ${v.id} (Socket: ${socketId})`);
       io.to(socketId).emit('sos:new', { alert, senior: s ? { id: s.id, name: s.name || s.full_name, phone: s.phone, region: seniorRegion } : { id: sid } });
     });
-  } catch { }
+  } catch (e) {
+    console.error('[SOS-DEBUG] Error in notifyOnlineVolunteersOfSos:', e);
+  }
 };
 
 // In-memory presence and session routing
@@ -3541,6 +3562,113 @@ app.post('/sos-alerts/:id/status', ensureAuth, async (req, res) => {
   }
 });
 
+app.post('/sos-alerts/:id/resolve', ensureAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { notes = '' } = req.body || {};
+    const role = String(req.user?.role || '').toLowerCase();
+
+    // Check permission
+    const { data: existing, error: fetchError } = await supabase.from(TABLES.SOS_ALERTS).select('*').eq('id', id).maybeSingle();
+    if (fetchError) throw fetchError;
+    if (!existing) return res.status(404).json({ error: 'SOS not found' });
+
+    if (role === 'volunteer') {
+      if (existing.volunteer_id !== req.user.id) {
+        return res.status(403).json({ error: 'Only assigned volunteer can resolve this SOS' });
+      }
+    } else if (role !== 'admin' && role !== 'superadmin' && role !== 'ngo') {
+      return res.status(403).json({ error: 'Forbidden' });
+    }
+
+    const now = new Date().toISOString();
+    const { data, error } = await supabase
+      .from(TABLES.SOS_ALERTS)
+      .update({ status: 'resolved', resolved_at: now, resolution: String(notes || '') })
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    clearSosEscalationTimer(id);
+    clearSosMultiStageTimers(id);
+    emitAdminUpdate({ type: 'sos_alert', action: 'resolved', alert: data });
+    emitNgoUpdate({ type: 'sos_alert', action: 'resolved', alert: data });
+
+    try {
+      await createAuditLog(req.user.id, 'sos_resolved', 'sos_alert', id, { notes });
+    } catch { }
+
+    res.json({ alert: data });
+  } catch (e) {
+    console.error('[ERROR] Failed to resolve SOS:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/sos-alerts/:id/escalate', ensureAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { reason = '' } = req.body || {};
+    const role = String(req.user?.role || '').toLowerCase();
+
+    // Check permission
+    const { data: existing, error: fetchError } = await supabase.from(TABLES.SOS_ALERTS).select('*').eq('id', id).maybeSingle();
+    if (fetchError) throw fetchError;
+    if (!existing) return res.status(404).json({ error: 'SOS not found' });
+
+    if (role === 'volunteer') {
+      if (existing.volunteer_id !== req.user.id) {
+        return res.status(403).json({ error: 'Only assigned volunteer can escalate this SOS' });
+      }
+    }
+
+    const now = new Date().toISOString();
+    const { data, error } = await supabase
+      .from(TABLES.SOS_ALERTS)
+      .update({
+        status: 'escalated',
+        escalated_at: now,
+        escalation_level: 'admin',
+        escalation_reason: String(reason || 'Escalated by volunteer')
+      })
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) {
+      // Fallback: DB might not allow 'escalated' status, just mark metadata
+      if (error.code === '23514' || error.code === '42703') {
+        const { data: fallback } = await supabase
+          .from(TABLES.SOS_ALERTS)
+          .update({
+            escalated_at: now,
+            escalation_level: 'admin',
+            escalation_reason: String(reason || 'Escalated by volunteer')
+          })
+          .eq('id', id)
+          .select()
+          .single();
+        return res.status(200).json({ alert: fallback, note: 'Escalation noted (metadata only)' });
+      }
+      throw error;
+    }
+
+    emitAdminUpdate({ type: 'sos_alert', action: 'escalated', alert: data });
+    emitNgoUpdate({ type: 'sos_alert', action: 'escalated', alert: data });
+
+    try {
+      await createAuditLog(req.user.id, 'sos_escalated', 'sos_alert', id, { reason });
+    } catch { }
+
+    res.json({ alert: data });
+  } catch (e) {
+    console.error('[ERROR] Failed to escalate SOS:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.get('/volunteer/sos-alerts', ensureAuth, async (req, res) => {
   try {
     const role = String(req.user?.role || '').toLowerCase();
@@ -3564,7 +3692,7 @@ app.get('/volunteer/sos-alerts', ensureAuth, async (req, res) => {
     const st = String(status || 'active').toLowerCase();
     const wantStatuses = st === 'all'
       ? Array.from(SOS_ACTIVE_STATUSES)
-      : (st === 'active' ? ['active', 'open'] : [st]);
+      : (st === 'active' ? ['active', 'open', 'acknowledged'] : [st]);
 
     let q = supabase.from(TABLES.SOS_ALERTS).select('*').in('status', wantStatuses);
     const { data, error } = await q.order('created_at', { ascending: false }).limit(lim);
