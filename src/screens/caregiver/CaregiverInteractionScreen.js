@@ -1,5 +1,6 @@
 // Caregiver Interaction Screen
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   View,
   Text,
@@ -21,6 +22,7 @@ import { useChat } from '../../context/ChatContext';
 import { getSocket } from '../../services/socketService';
 
 const CaregiverInteractionScreen = ({ navigation, route }) => {
+  const { t } = useTranslation();
   const { requestId, request, conversationId, seniorId } = route.params || {};
 
   const { removeActiveChat } = useChat();
@@ -406,7 +408,7 @@ const CaregiverInteractionScreen = ({ navigation, route }) => {
             color={colors.neutral.black}
           />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Senior Details</Text>
+        <Text style={styles.headerTitle}>{t('caregiver.interaction.seniorDetails')}</Text>
         <TouchableOpacity style={styles.moreButton}>
           <MaterialCommunityIcons
             name="dots-vertical"
@@ -450,7 +452,7 @@ const CaregiverInteractionScreen = ({ navigation, route }) => {
                 size={24}
                 color={colors.neutral.white}
               />
-              <Text style={styles.actionText}>Call</Text>
+              <Text style={styles.actionText}>{t('caregiver.interaction.call')}</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -462,7 +464,7 @@ const CaregiverInteractionScreen = ({ navigation, route }) => {
                 size={24}
                 color={colors.neutral.white}
               />
-              <Text style={styles.actionText}>Chat</Text>
+              <Text style={styles.actionText}>{t('caregiver.interaction.chat')}</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -474,14 +476,14 @@ const CaregiverInteractionScreen = ({ navigation, route }) => {
                 size={24}
                 color={colors.neutral.white}
               />
-              <Text style={styles.actionText}>Location</Text>
+              <Text style={styles.actionText}>{t('caregiver.interaction.location')}</Text>
             </TouchableOpacity>
           </View>
         </View>
 
         {/* Help Request Details */}
         <View style={[styles.detailsCard, shadows.sm]}>
-          <Text style={styles.sectionTitle}>Help Request</Text>
+          <Text style={styles.sectionTitle}>{t('caregiver.interaction.helpRequest')}</Text>
 
           <View style={styles.detailRow}>
             <MaterialCommunityIcons
@@ -490,7 +492,7 @@ const CaregiverInteractionScreen = ({ navigation, route }) => {
               color={colors.primary.main}
             />
             <View style={styles.detailContent}>
-              <Text style={styles.detailLabel}>Type</Text>
+              <Text style={styles.detailLabel}>{t('caregiver.interaction.type')}</Text>
               <Text style={styles.detailValue}>{seniorDetails.helpType}</Text>
             </View>
           </View>
@@ -502,7 +504,7 @@ const CaregiverInteractionScreen = ({ navigation, route }) => {
               color={colors.primary.main}
             />
             <View style={styles.detailContent}>
-              <Text style={styles.detailLabel}>Description</Text>
+              <Text style={styles.detailLabel}>{t('caregiver.interaction.description')}</Text>
               <Text style={styles.detailValue}>{seniorDetails.description}</Text>
             </View>
           </View>
@@ -510,7 +512,7 @@ const CaregiverInteractionScreen = ({ navigation, route }) => {
 
         {/* Contact Information */}
         <View style={[styles.detailsCard, shadows.sm]}>
-          <Text style={styles.sectionTitle}>Contact Information</Text>
+          <Text style={styles.sectionTitle}>{t('caregiver.interaction.contactInfo')}</Text>
 
           <View style={styles.detailRow}>
             <MaterialCommunityIcons
@@ -519,7 +521,7 @@ const CaregiverInteractionScreen = ({ navigation, route }) => {
               color={colors.secondary.green}
             />
             <View style={styles.detailContent}>
-              <Text style={styles.detailLabel}>Phone</Text>
+              <Text style={styles.detailLabel}>{t('caregiver.interaction.phone')}</Text>
               <Text style={styles.detailValue}>{seniorDetails.phone}</Text>
             </View>
           </View>
@@ -531,7 +533,7 @@ const CaregiverInteractionScreen = ({ navigation, route }) => {
               color={colors.accent.orange}
             />
             <View style={styles.detailContent}>
-              <Text style={styles.detailLabel}>Address</Text>
+              <Text style={styles.detailLabel}>{t('caregiver.interaction.address')}</Text>
               <Text style={styles.detailValue}>{seniorDetails.address}</Text>
             </View>
           </View>
@@ -543,7 +545,7 @@ const CaregiverInteractionScreen = ({ navigation, route }) => {
               color={colors.accent.red}
             />
             <View style={styles.detailContent}>
-              <Text style={styles.detailLabel}>Emergency Contact</Text>
+              <Text style={styles.detailLabel}>{t('caregiver.interaction.emergencyContact')}</Text>
               <Text style={styles.detailValue}>{seniorDetails.emergencyContact}</Text>
             </View>
           </View>
@@ -557,19 +559,19 @@ const CaregiverInteractionScreen = ({ navigation, route }) => {
               size={24}
               color={colors.accent.red}
             />
-            <Text style={styles.medicalTitle}>Medical Information</Text>
+            <Text style={styles.medicalTitle}>{t('caregiver.interaction.medicalInfo')}</Text>
           </View>
           <Text style={styles.medicalText}>{seniorDetails.medicalInfo}</Text>
         </View>
 
         {/* Notes Section */}
         <View style={[styles.notesCard, shadows.sm]}>
-          <Text style={styles.sectionTitle}>Notes</Text>
+          <Text style={styles.sectionTitle}>{t('caregiver.interaction.notes')}</Text>
           <TextInput
             style={styles.notesInput}
             value={notes}
             onChangeText={setNotes}
-            placeholder="Add notes about this interaction..."
+            placeholder={t('caregiver.interaction.notesPlaceholder')}
             placeholderTextColor={colors.neutral.darkGray}
             multiline
             numberOfLines={4}
@@ -579,7 +581,7 @@ const CaregiverInteractionScreen = ({ navigation, route }) => {
         {/* Action Buttons */}
         <View style={styles.actionButtons}>
           <LargeButton
-            title="Start In-App Chat"
+            title={t('caregiver.interaction.startChat')}
             onPress={() => {
               if (conversationId && seniorId) {
                 navigation.navigate('Chat', {
@@ -598,7 +600,7 @@ const CaregiverInteractionScreen = ({ navigation, route }) => {
           />
 
           <LargeButton
-            title="Mark as Resolved"
+            title={t('caregiver.interaction.markResolved')}
             onPress={handleMarkResolved}
             icon="check-circle"
             variant="secondary"
@@ -615,7 +617,7 @@ const CaregiverInteractionScreen = ({ navigation, route }) => {
               size={24}
               color={colors.accent.red}
             />
-            <Text style={styles.escalateText}>Escalate to NGO/Admin</Text>
+            <Text style={styles.escalateText}>{t('caregiver.interaction.escalate')}</Text>
           </TouchableOpacity>
         </View>
       </ScrollView>

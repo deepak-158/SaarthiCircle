@@ -1,9 +1,10 @@
 // Caregiver Dashboard Screen
 import React, { useState, useEffect, useCallback } from 'react';
-import { 
-  View, 
-  Text, 
-  StyleSheet, 
+import { useTranslation } from 'react-i18next';
+import {
+  View,
+  Text,
+  StyleSheet,
   SafeAreaView,
   ScrollView,
   TouchableOpacity,
@@ -101,6 +102,7 @@ const DUMMY_REQUESTS = [
 import { BACKEND_URL as API_BASE } from '../../config/backend';
 
 const CaregiverDashboard = ({ navigation }) => {
+  const { t } = useTranslation();
   const [allRequests, setAllRequests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -166,7 +168,7 @@ const CaregiverDashboard = ({ navigation }) => {
     try {
       if (showLoading) setLoading(true);
       const token = await AsyncStorage.getItem('userToken');
-      
+
       // Load fresh profile from backend
       try {
         const resp = await fetch(`${API_BASE}/me`, {
@@ -188,7 +190,7 @@ const CaregiverDashboard = ({ navigation }) => {
         const profileJson = await AsyncStorage.getItem('userProfile');
         if (profileJson) setVolunteerProfile(JSON.parse(profileJson));
       }
-      
+
       // Load help requests (can be expanded to backend later)
       await loadHelpRequests();
 
@@ -201,8 +203,8 @@ const CaregiverDashboard = ({ navigation }) => {
           const data = await resp.json();
           setAvailabilityOnline(!!data?.isOnline);
         }
-      } catch {}
-      
+      } catch { }
+
     } catch (error) {
       console.error('Error loading dashboard:', error);
     } finally {
@@ -234,7 +236,7 @@ const CaregiverDashboard = ({ navigation }) => {
           const socket = getSocket();
           socket?.emit('volunteer:availability', { volunteerId: userId, isOnline: next });
         }
-      } catch {}
+      } catch { }
     } catch (e) {
       Alert.alert('Error', e?.message || 'Failed to update availability');
     }
@@ -250,9 +252,9 @@ const CaregiverDashboard = ({ navigation }) => {
       const resp = await fetch(`${API_BASE}/help-requests?status=all`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
-      
+
       if (!resp.ok) throw new Error('Failed to fetch requests');
-      
+
       const data = await resp.json();
       const realRequests = (data.requests || []).map(r => ({
         id: r.id,
@@ -296,11 +298,11 @@ const CaregiverDashboard = ({ navigation }) => {
     const now = new Date();
     const past = date instanceof Date ? date : new Date(date);
     const diff = now - past;
-    
+
     const minutes = Math.floor(diff / (1000 * 60));
     const hours = Math.floor(diff / (1000 * 60 * 60));
     const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-    
+
     if (minutes < 1) return 'Just now';
     if (minutes < 60) return `${minutes} min ago`;
     if (hours < 24) return `${hours} hour${hours > 1 ? 's' : ''} ago`;
@@ -349,29 +351,29 @@ const CaregiverDashboard = ({ navigation }) => {
     try {
       const token = await AsyncStorage.getItem('userToken');
       let conversationId = null;
-      
+
       if (!requestId.toString().startsWith('dummy')) {
         const resp = await fetch(`${API_BASE}/help-requests/${requestId}/accept`, {
           method: 'PUT',
           headers: { 'Authorization': `Bearer ${token}` }
         });
         if (!resp.ok) throw new Error('Failed to accept request');
-        
+
         const data = await resp.json();
         conversationId = data.conversationId || data.conversation?.id;
         console.log('[DEBUG] Accept response - conversationId:', conversationId);
       }
-      
+
       // Update local state
-      setAllRequests(prev => 
+      setAllRequests(prev =>
         prev.map(r => r.id === requestId ? { ...r, status: 'active' } : r)
       );
-      
+
       const request = allRequests.find(r => r.id === requestId);
-      
+
       // Pass conversationId to the next screen
-      navigation.navigate('CaregiverInteraction', { 
-        requestId, 
+      navigation.navigate('CaregiverInteraction', {
+        requestId,
         request,
         conversationId,
         seniorId: request?.senior?.id || request?.senior_id
@@ -388,8 +390,8 @@ const CaregiverDashboard = ({ navigation }) => {
       'Are you sure you want to decline this request?',
       [
         { text: 'Cancel', style: 'cancel' },
-        { 
-          text: 'Decline', 
+        {
+          text: 'Decline',
           style: 'destructive',
           onPress: () => {
             setAllRequests(prev => prev.filter(r => r.id !== requestId));
@@ -402,7 +404,7 @@ const CaregiverDashboard = ({ navigation }) => {
   const handleComplete = async (requestId) => {
     try {
       const token = await AsyncStorage.getItem('userToken');
-      
+
       const isDummy = requestId.toString().startsWith('dummy');
 
       if (!isDummy) {
@@ -424,14 +426,14 @@ const CaregiverDashboard = ({ navigation }) => {
           // ignore
         }
       }
-      
+
       // Update local state
       setAllRequests((prev) => {
         const updated = prev.map((r) => (r.id === requestId ? { ...r, status: 'completed', completedAt: 'Just now' } : r));
         persistRequestsCache(updated);
         return updated;
       });
-      
+
       Alert.alert('Success', 'Request marked as completed!');
     } catch (error) {
       console.error('Complete request error:', error);
@@ -492,7 +494,7 @@ const CaregiverDashboard = ({ navigation }) => {
       >
         <View style={styles.headerContent}>
           <View>
-            <Text style={styles.headerGreeting}>Welcome Back</Text>
+            <Text style={styles.headerGreeting}>{t('caregiver.dashboard.welcomeBack')}</Text>
             <Text style={styles.headerTitle}>
               {volunteerProfile?.full_name || volunteerProfile?.fullName || 'Volunteer'}
             </Text>
@@ -502,10 +504,10 @@ const CaregiverDashboard = ({ navigation }) => {
               style={[styles.availabilityButton, availabilityOnline ? styles.availabilityOnline : styles.availabilityOffline]}
               onPress={toggleAvailability}
             >
-              <Text style={styles.availabilityText}>{availabilityOnline ? 'Online' : 'Offline'}</Text>
+              <Text style={styles.availabilityText}>{availabilityOnline ? t('caregiver.dashboard.online') : t('caregiver.dashboard.offline')}</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.profileButton}
               onPress={() => navigation.navigate('VolunteerProfile')}
             >
@@ -522,17 +524,17 @@ const CaregiverDashboard = ({ navigation }) => {
         <View style={styles.statsContainer}>
           <View style={styles.statItem}>
             <Text style={styles.statNumber}>{pendingCount}</Text>
-            <Text style={styles.statLabel}>Pending</Text>
+            <Text style={styles.statLabel}>{t('caregiver.dashboard.pending')}</Text>
           </View>
           <View style={styles.statDivider} />
           <View style={styles.statItem}>
             <Text style={styles.statNumber}>{completedCount}</Text>
-            <Text style={styles.statLabel}>Completed</Text>
+            <Text style={styles.statLabel}>{t('caregiver.dashboard.completed')}</Text>
           </View>
           <View style={styles.statDivider} />
           <View style={styles.statItem}>
             <Text style={styles.statNumber}>{volunteerProfile?.rating || '4.8'}</Text>
-            <Text style={styles.statLabel}>Rating</Text>
+            <Text style={styles.statLabel}>{t('caregiver.dashboard.rating')}</Text>
           </View>
         </View>
       </LinearGradient>
@@ -542,7 +544,7 @@ const CaregiverDashboard = ({ navigation }) => {
         <View style={styles.pendingBanner}>
           <MaterialCommunityIcons name="clock-alert-outline" size={20} color={colors.neutral.white} />
           <Text style={styles.pendingBannerText}>
-            Application Pending Approval. Our team is reviewing your profile.
+            {t('caregiver.dashboard.pendingBanner')}
           </Text>
         </View>
       )}
@@ -554,7 +556,7 @@ const CaregiverDashboard = ({ navigation }) => {
           onPress={() => setActiveTab('pending')}
         >
           <Text style={[styles.tabText, activeTab === 'pending' && styles.activeTabText]}>
-            Pending Requests
+            {t('caregiver.dashboard.tabs.pending')}
           </Text>
         </TouchableOpacity>
         <TouchableOpacity
@@ -562,7 +564,7 @@ const CaregiverDashboard = ({ navigation }) => {
           onPress={() => setActiveTab('active')}
         >
           <Text style={[styles.tabText, activeTab === 'active' && styles.activeTabText]}>
-            Active
+            {t('caregiver.dashboard.tabs.active')}
           </Text>
         </TouchableOpacity>
         <TouchableOpacity
@@ -570,7 +572,7 @@ const CaregiverDashboard = ({ navigation }) => {
           onPress={() => setActiveTab('history')}
         >
           <Text style={[styles.tabText, activeTab === 'history' && styles.activeTabText]}>
-            History
+            {t('caregiver.dashboard.tabs.history')}
           </Text>
         </TouchableOpacity>
       </View>
@@ -591,22 +593,22 @@ const CaregiverDashboard = ({ navigation }) => {
               color={colors.neutral.mediumGray}
             />
             <Text style={styles.emptyText}>
-              {activeTab === 'pending' && 'No pending requests'}
-              {activeTab === 'active' && 'No active tasks'}
-              {activeTab === 'history' && 'No completed tasks yet'}
+              {activeTab === 'pending' && t('caregiver.dashboard.empty.pending')}
+              {activeTab === 'active' && t('caregiver.dashboard.empty.active')}
+              {activeTab === 'history' && t('caregiver.dashboard.empty.history')}
             </Text>
           </View>
         ) : (
           filteredRequests.map((request) => (
-            <TouchableOpacity 
-              key={request.id} 
+            <TouchableOpacity
+              key={request.id}
               style={[styles.requestCard, shadows.md]}
               onPress={() => handleViewDetails(request)}
               activeOpacity={0.8}
             >
               {/* Priority Badge */}
               <View style={[
-                styles.priorityBadge, 
+                styles.priorityBadge,
                 { backgroundColor: getPriorityColor(request.priority) }
               ]}>
                 <Text style={styles.priorityText}>
@@ -664,7 +666,7 @@ const CaregiverDashboard = ({ navigation }) => {
                       size={24}
                       color={colors.neutral.darkGray}
                     />
-                    <Text style={styles.declineText}>Decline</Text>
+                    <Text style={styles.declineText}>{t('caregiver.dashboard.actions.decline')}</Text>
                   </TouchableOpacity>
 
                   <TouchableOpacity
@@ -676,7 +678,7 @@ const CaregiverDashboard = ({ navigation }) => {
                       size={24}
                       color={colors.neutral.white}
                     />
-                    <Text style={styles.acceptText}>Accept</Text>
+                    <Text style={styles.acceptText}>{t('caregiver.dashboard.actions.accept')}</Text>
                   </TouchableOpacity>
                 </View>
               )}
@@ -692,7 +694,7 @@ const CaregiverDashboard = ({ navigation }) => {
                       size={20}
                       color={colors.primary.main}
                     />
-                    <Text style={styles.viewText}>View Details</Text>
+                    <Text style={styles.viewText}>{t('caregiver.dashboard.actions.viewDetails')}</Text>
                   </TouchableOpacity>
 
                   <TouchableOpacity
@@ -704,7 +706,7 @@ const CaregiverDashboard = ({ navigation }) => {
                       size={20}
                       color={colors.neutral.white}
                     />
-                    <Text style={styles.completeText}>Mark Done</Text>
+                    <Text style={styles.completeText}>{t('caregiver.dashboard.actions.markDone')}</Text>
                   </TouchableOpacity>
                 </View>
               )}
@@ -714,7 +716,7 @@ const CaregiverDashboard = ({ navigation }) => {
       </ScrollView>
 
       {/* SOS Alert Button */}
-      <TouchableOpacity 
+      <TouchableOpacity
         style={styles.sosAlertButton}
         onPress={() => navigation.navigate('SOSAlerts')}
       >
@@ -723,7 +725,7 @@ const CaregiverDashboard = ({ navigation }) => {
           size={24}
           color={colors.neutral.white}
         />
-        <Text style={styles.sosAlertText}>2 SOS Alerts</Text>
+        <Text style={styles.sosAlertText}>{t('caregiver.dashboard.sosAlerts', { count: 2 })}</Text>
       </TouchableOpacity>
     </SafeAreaView>
   );

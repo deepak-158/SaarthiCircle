@@ -1,5 +1,6 @@
 // Volunteer Session Screen - brings a volunteer online and waits for a match
 import React, { useEffect, useState, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { View, Text, SafeAreaView, StyleSheet, TouchableOpacity, ActivityIndicator, Animated, Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -9,6 +10,7 @@ import { useChat } from '../../context/ChatContext';
 import socketService, { getSocket, identify } from '../../services/socketService';
 
 const VolunteerSessionScreen = ({ navigation }) => {
+  const { t } = useTranslation();
   const [isOnline, setIsOnline] = useState(false);
   const [userId, setUserId] = useState(null);
   const [pendingSeniorId, setPendingSeniorId] = useState(null);
@@ -107,8 +109,8 @@ const VolunteerSessionScreen = ({ navigation }) => {
       <View style={styles.container}>
         <View style={styles.header}>
           <MaterialCommunityIcons name="account-heart" size={48} color={colors.primary.main} />
-          <Text style={styles.title}>Volunteer Mode</Text>
-          <Text style={styles.subtitle}>Go online to be matched with a senior seeking companionship</Text>
+          <Text style={styles.title}>{t('caregiver.session.title')}</Text>
+          <Text style={styles.subtitle}>{t('caregiver.session.subtitle')}</Text>
         </View>
 
         {isOnline ? (
@@ -117,7 +119,7 @@ const VolunteerSessionScreen = ({ navigation }) => {
               <MaterialCommunityIcons name="radar" size={40} color={colors.primary.main} />
             </Animated.View>
             <Text style={styles.statusText}>
-              {pendingSeniorId ? `Incoming ${pendingRequestType} request...` : 'Waiting for a match...'}
+              {pendingSeniorId ? t('caregiver.session.incomingRequest', { type: pendingRequestType }) : t('caregiver.session.waiting')}
             </Text>
             {pendingNote ? (
               <Text style={{ marginTop: spacing.xs, color: colors.neutral.darkGray }}>{pendingNote}</Text>
@@ -127,19 +129,19 @@ const VolunteerSessionScreen = ({ navigation }) => {
               <TouchableOpacity style={styles.onlineBtn} onPress={handleAccept}>
                 <MaterialCommunityIcons name="check" size={24} color={colors.neutral.white} />
                 <Text style={styles.onlineBtnText}>
-                  {pendingRequestType === 'voice' ? 'Accept Voice Call' : pendingRequestType === 'emotional' ? 'Accept Support Request' : 'Accept Chat'}
+                  {pendingRequestType === 'voice' ? t('caregiver.session.acceptVoice') : pendingRequestType === 'emotional' ? t('caregiver.session.acceptSupport') : t('caregiver.session.acceptChat')}
                 </Text>
               </TouchableOpacity>
             )}
             <TouchableOpacity style={[styles.offlineBtn]} onPress={handleGoOffline}>
               <MaterialCommunityIcons name="power" size={22} color={colors.neutral.white} />
-              <Text style={styles.offlineBtnText}>Go Offline</Text>
+              <Text style={styles.offlineBtnText}>{t('caregiver.session.goOffline')}</Text>
             </TouchableOpacity>
           </View>
         ) : (
           <TouchableOpacity style={styles.onlineBtn} onPress={handleGoOnline}>
             <MaterialCommunityIcons name="power" size={24} color={colors.neutral.white} />
-            <Text style={styles.onlineBtnText}>Go Online</Text>
+            <Text style={styles.onlineBtnText}>{t('caregiver.session.goOnline')}</Text>
           </TouchableOpacity>
         )}
       </View>

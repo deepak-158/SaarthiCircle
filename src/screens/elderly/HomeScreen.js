@@ -1,9 +1,10 @@
 // Home Screen - Main screen for elderly users
 import React, { useState, useEffect } from 'react';
-import { 
-  View, 
-  Text, 
-  StyleSheet, 
+import { useTranslation } from 'react-i18next';
+import {
+  View,
+  Text,
+  StyleSheet,
   SafeAreaView,
   ScrollView,
   TouchableOpacity,
@@ -13,7 +14,6 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LargeButton, MoodSelector, VoiceButton } from '../../components/common';
 import { colors, typography, spacing, borderRadius, shadows } from '../../theme';
-import { getTranslation } from '../../i18n/translations';
 
 // Default profile data if user data not available
 const DEFAULT_PROFILE = {
@@ -23,15 +23,14 @@ const DEFAULT_PROFILE = {
 };
 
 const HomeScreen = ({ navigation }) => {
-  const [language] = useState('en');
-  const t = getTranslation(language);
+  const { t } = useTranslation();
   const [currentMood, setCurrentMood] = useState(null);
   const [userProfile, setUserProfile] = useState(DEFAULT_PROFILE);
   const [greeting, setGreeting] = useState('');
 
   useEffect(() => {
     loadUserProfile();
-    
+
     // Set greeting based on time of day
     const hour = new Date().getHours();
     if (hour < 12) {
@@ -88,7 +87,7 @@ const HomeScreen = ({ navigation }) => {
       style={styles.container}
     >
       <SafeAreaView style={styles.safeArea}>
-        <ScrollView 
+        <ScrollView
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
         >
@@ -97,18 +96,18 @@ const HomeScreen = ({ navigation }) => {
             <View style={styles.greetingContainer}>
               <Text style={styles.greetingTime}>{greeting} 🌸</Text>
               <Text style={styles.greetingName}>
-                {userProfile.fullName && userProfile.fullName !== DEFAULT_PROFILE.fullName 
-                  ? `Hello, ${userProfile.fullName.split(' ')[0]}!` 
-                  : t.home.greeting}
+                {userProfile.fullName && userProfile.fullName !== DEFAULT_PROFILE.fullName
+                  ? `Hello, ${userProfile.fullName.split(' ')[0]}!`
+                  : t('home.greeting')}
               </Text>
-              <Text style={styles.safeMessage}>{t.home.safeMessage}</Text>
+              <Text style={styles.safeMessage}>{t('home.safeMessage')}</Text>
               {userProfile.city && userProfile.city !== 'Your City' && (
                 <Text style={styles.locationText}>📍 {userProfile.city}</Text>
               )}
             </View>
-            
+
             {/* Profile Icon */}
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.profileButton}
               onPress={() => navigation.navigate('Profile')}
             >
@@ -124,7 +123,7 @@ const HomeScreen = ({ navigation }) => {
           {currentMood && (
             <View style={[styles.currentMoodCard, shadows.sm]}>
               <Text style={styles.currentMoodText}>
-                {currentMood === 'happy' ? '😊' : currentMood === 'okay' ? '😐' : '😞'} 
+                {currentMood === 'happy' ? '😊' : currentMood === 'okay' ? '😐' : '😞'}
                 {' '}You're feeling {currentMood} today
               </Text>
             </View>
@@ -134,7 +133,7 @@ const HomeScreen = ({ navigation }) => {
           <View style={styles.mainButtons}>
             {/* Talk to Companion - Primary Action */}
             <LargeButton
-              title={t.home.talkToCompanion}
+              title={t('home.talkToCompanion')}
               onPress={handleTalkToCompanion}
               icon="heart"
               variant="companion"
@@ -144,7 +143,7 @@ const HomeScreen = ({ navigation }) => {
 
             {/* I Need Help */}
             <LargeButton
-              title={t.home.needHelp}
+              title={t('home.needHelp')}
               onPress={handleNeedHelp}
               icon="hand-heart"
               variant="secondary"
@@ -154,7 +153,7 @@ const HomeScreen = ({ navigation }) => {
 
             {/* Emergency SOS */}
             <LargeButton
-              title={t.home.emergency}
+              title={t('home.emergency')}
               onPress={handleEmergency}
               icon="alert-circle"
               variant="danger"
@@ -170,8 +169,8 @@ const HomeScreen = ({ navigation }) => {
 
           {/* Daily Mood Check-in */}
           <View style={[styles.moodSection, shadows.sm]}>
-            <Text style={styles.moodTitle}>{t.home.moodQuestion}</Text>
-            
+            <Text style={styles.moodTitle}>{t('home.moodQuestion')}</Text>
+
             <MoodSelector
               selectedMood={currentMood}
               onMoodSelect={handleMoodSelect}
@@ -179,7 +178,7 @@ const HomeScreen = ({ navigation }) => {
             />
 
             {/* Voice Option */}
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.voiceMoodButton}
               onPress={handleVoiceMood}
             >
@@ -189,13 +188,13 @@ const HomeScreen = ({ navigation }) => {
                 color={colors.primary.main}
               />
               <Text style={styles.voiceMoodText}>
-                🎤 "{t.mood.voicePrompt}"
+                🎤 "{t('mood.voicePrompt')}"
               </Text>
             </TouchableOpacity>
           </View>
 
           {/* Quick Help Card */}
-          <TouchableOpacity 
+          <TouchableOpacity
             style={[styles.quickHelpCard, shadows.sm]}
             onPress={handleNeedHelp}
           >
@@ -205,9 +204,9 @@ const HomeScreen = ({ navigation }) => {
               color={colors.secondary.green}
             />
             <View style={styles.quickHelpText}>
-              <Text style={styles.quickHelpTitle}>Need to talk?</Text>
+              <Text style={styles.quickHelpTitle}>{t('home.quickHelpTitle')}</Text>
               <Text style={styles.quickHelpSubtitle}>
-                We're here 24/7 for you
+                {t('home.quickHelpSubtitle')}
               </Text>
             </View>
             <MaterialCommunityIcons

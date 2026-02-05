@@ -1,0 +1,343 @@
+{
+    "login": {
+        "title": "ಲಾಗಿನ್ / ನೋಂದಣಿ",
+        "emailLabel": "ಇಮೇಲ್ ವಿಳಾಸ",
+        "emailPlaceholder": "your@email.com",
+        "phoneLabel": "ದೂರವಾಣಿ ಸಂಖ್ಯೆ",
+        "phonePlaceholder": "೧೦-ಅಂಕಿಯ ಸಂಖ್ಯೆ",
+        "sendOtp": "OTP ಕಳುಹಿಸಿ",
+        "enterOtp": "OTP ನಮೂದಿಸಿ",
+        "otpSentTo": "OTP ಅನ್ನು {{email}} ಗೆ ಕಳುಹಿಸಲಾಗಿದೆ",
+        "otpPlaceholder": "೬-ಅಂಕಿಯ OTP ನಮೂದಿಸಿ",
+        "verify": "ಪರಿಶೀಲಿಸಿ ಮತ್ತು ಮುಂದುವರಿಯಿರಿ",
+        "resendOtp": "OTP ಮರುಕಳುಹಿಸಿ",
+        "changeContact": "ಇಮೇಲ್/ಫೋನ್ ಬದಲಾಯಿಸಿ",
+        "terms": "ಮುಂದುವರಿಯುವ ಮೂಲಕ, ನೀವು ನಮ್ಮ ನಿಯಮಗಳಿಗೆ ಸಮ್ಮತಿಸುತ್ತೀರಿ",
+        "tagline": "ಹಿರಿಯರಿಗೆ ಒಡನಾಟ",
+        "appName": "ಸಾಥಿ ಸರ್ಕಲ್",
+        "invalidEmail": "ಅಮಾನ್ಯ ಇಮೇಲ್",
+        "invalidPhone": "ಅಮಾನ್ಯ ಫೋನ್",
+        "enterValidEmail": "ದಯವಿಟ್ಟು ಮಾನ್ಯ ಇಮೇಲ್ ವಿಳಾಸವನ್ನು ನಮೂದಿಸಿ",
+        "enterValidPhone": "ದಯವಿಟ್ಟು ಮಾನ್ಯ ೧೦-ಅಂಕಿಯ ಫೋನ್ ಸಂಖ್ಯೆಯನ್ನು ನಮೂದಿಸಿ"
+    },
+    "common": {
+        "error": "ದೋಷ",
+        "ok": "ಸರಿ",
+        "loading": "ಲೋಡ್ ಆಗುತ್ತಿದೆ...",
+        "back": "Back",
+        "next": "Next",
+        "cancel": "Cancel",
+        "confirm": "Confirm",
+        "save": "Save",
+        "call": "Call",
+        "chat": "Chat",
+        "retry": "Try Again"
+    },
+    "caregiver": {
+        "interaction": {
+            "seniorDetails": "ಹಿರಿಯರ ವಿವರಗಳು",
+            "call": " ಕರೆ ಮಾಡಿ",
+            "chat": "ಚಾಟ್",
+            "location": "ಸ್ಥಳ",
+            "helpRequest": "ಸಹಾಯ ವಿನಂತಿ",
+            "type": "ಬಗೆ",
+            "description": "ವಿವರಣೆ",
+            "contactInfo": "ಸಂಪರ್ಕ ಮಾಹಿತಿ",
+            "phone": "ಫೋನ್",
+            "address": "ವಿಳಾಸ",
+            "emergencyContact": "ತುರ್ತು ಸಂಪರ್ಕ",
+            "medicalInfo": "ವೈದ್ಯಕೀಯ ಮಾಹಿತಿ",
+            "notes": "ಟಿಪ್ಪಣಿಗಳು",
+            "notesPlaceholder": "ಈ ಸಂವಾದದ ಬಗ್ಗೆ ಟಿಪ್ಪಣಿಗಳನ್ನು ಸೇರಿಸಿ...",
+            "startChat": "ಇನ್-ಆಪ್ ಚಾಟ್ ಪ್ರಾರಂಭಿಸಿ",
+            "markResolved": "ಪರಿಹರಿಸಲಾಗಿದೆ ಎಂದು ಗುರುತಿಸಿ",
+            "escalate": "ಎನ್‌ಜಿಒ/ನಿರ್ವಾಹಕರಿಗೆ ವರ್ಗಾಯಿಸಿ",
+            "escalateConfirm": "ವರ್ಗಾವಣೆಯನ್ನು ದೃಢೀಕರಿಸಿ",
+            "resolveConfirm": "ಪರಿಹಾರವನ್ನು ದೃಢೀಕರಿಸಿ",
+            "success": "ಯಶಸ್ವಿ",
+            "error": "ದೋಷ"
+        },
+        "session": {
+            "title": "ಸ್ವಯಂಸೇವಕ ಮೋಡ್",
+            "subtitle": "ಸಾಥಿ ಬಯಸುವ ಹಿರಿಯರೊಂದಿಗೆ ಸಂಪರ್ಕ ಹೊಂದಲು ಆನ್‌ಲೈನ್‌ಗೆ ಬನ್ನಿ",
+            "waiting": "ಹೊಂದಾಣಿಕೆಗಾಗಿ ಕಾಯಲಾಗುತ್ತಿದೆ...",
+            "incomingRequest": "ಒಳಬರುವ {{type}} ವಿನಂತಿ...",
+            "goOnline": "ಆನ್‌ಲೈನ್‌ಗೆ ಹೋಗಿ",
+            "goOffline": "ಆಫ್‌ಲೈನ್‌ಗೆ ಹೋಗಿ",
+            "acceptVoice": "ಧ್ವನಿ ಕರೆಯನ್ನು ಸ್ವೀಕರಿಸಿ",
+            "acceptSupport": "ಸಹಾಯ ವಿನಂತಿಯನ್ನು ಸ್ವೀಕರಿಸಿ",
+            "acceptChat": "ಚಾಟ್ ಸ್ವೀಕರಿಸಿ"
+        },
+        "dashboard": {
+            "welcomeBack": "ಸ್ವಾಗತ",
+            "pending": "ಬಾಕಿ",
+            "completed": "ಪೂರ್ಣಗೊಂಡಿದೆ",
+            "rating": "ರೇಟಿಂಗ್",
+            "online": "ಆನ್‌ಲೈನ್",
+            "offline": "ಆಫ್‌ಲೈನ್",
+            "pendingBanner": "ಅರ್ಜಿ ಅನುಮೋದನೆ ಬಾಕಿಯಿದೆ. ನಮ್ಮ ತಂಡ ನಿಮ್ಮ ಪ್ರೊಫೈಲ್ ಅನ್ನು ಪರಿಶೀಲಿಸುತ್ತಿದೆ.",
+            "tabs": {
+                "pending": "ಬಾಕಿ ವಿನಂತಿಗಳು",
+                "active": "ಸಕ್ರಿಯ",
+                "history": "ಇತಿಹಾಸ"
+            },
+            "empty": {
+                "pending": "ಯಾವುದೇ ಬಾಕಿ ವಿನಂತಿಗಳಿಲ್ಲ",
+                "active": "ಯಾವುದೇ ಸಕ್ರಿಯ ಕಾರ್ಯಗಳಿಲ್ಲ",
+                "history": "ಇನ್ನೂ ಯಾವುದೇ ಪೂರ್ಣಗೊಂಡ ಕಾರ್ಯಗಳಿಲ್ಲ"
+            },
+            "actions": {
+                "decline": "ನಿರಾಕರಿಸಿ",
+                "accept": "ಸ್ವೀಕರಿಸಿ",
+                "viewDetails": "ವಿವರಗಳನ್ನು ವೀಕ್ಷಿಸಿ",
+                "markDone": "ಪೂರ್ಣಗೊಂಡಿದೆ ಎಂದು ಗುರುತಿಸಿ"
+            },
+            "sosAlerts": "{{count}} SOS ಎಚ್ಚರಿಕೆಗಳು"
+        }
+    },
+    "calling": {
+        "incomingTitle": "ಒಳಬರುವ ಕರೆ",
+        "unknownCaller": "ಗೊತ್ತಿಲ್ಲದ ಕರೆ",
+        "accept": "ಸ್ವೀಕರಿಸಿ",
+        "reject": "ತಿರಸ್ಕರಿಸಿ"
+    },
+    "home": {
+        "greeting": "ನಮಸ್ಕಾರ, ಸ್ನೇಹಿತ!",
+        "safeMessage": "ನಾವು ನಿಮಗಾಗಿ ೨೪/೭ ಇದ್ದೇವೆ",
+        "talkToCompanion": "ಸಾಥಿಯೊಂದಿಗೆ ಮಾತನಾಡಿ",
+        "needHelp": "ನನಗೆ ಸಹಾಯ ಬೇಕು",
+        "emergency": "ತುರ್ತು SOS",
+        "moodQuestion": "ಇಂದು ನಿಮಗೆ ಹೇಗೆ ಅನಿಸುತ್ತಿದೆ?",
+        "quickHelpTitle": "ಮಾತನಾಡಬೇಕೇ?",
+        "quickHelpSubtitle": "ನಾವು ನಿಮಗಾಗಿ ೨೪/೭ ಇಲ್ಲಿದ್ದೇವೆ"
+    },
+    "mood": {
+        "voicePrompt": "ನಿಮಗೆ ಹೇಗೆ ಅನಿಸುತ್ತಿದೆ ಎಂದು ನಮಗೆ ತಿಳಿಸಿ..."
+    },
+    "admin": {
+        "welcome": "ಸ್ವಾಗತ,",
+        "stats": {
+            "totalSeniors": "ಒಟ್ಟು ಹಿರಿಯರು",
+            "activeCaregivers": "ಸಕ್ರಿಯ ಪಾಲಕರು",
+            "pendingRequests": "ಬಾಕಿ ವಿನಂತಿಗಳು",
+            "helpResolved": "ಪರಿಹರಿಸಲಾದ ಸಹಾಯ"
+        },
+        "sections": {
+            "keyMetrics": "ಪ್ರಮುಖ ಮಾಪನಗಳು",
+            "quickActions": "ತ್ವರಿತ ಕ್ರಮಗಳು",
+            "recentActivity": "ಇತ್ತೀಚಿನ ಚಟುವಟಿಕೆ",
+            "viewAll": "ಎಲ್ಲವನ್ನೂ ವೀಕ್ಷಿಸಿ"
+        },
+        "actions": {
+            "aiRisk": "AI ಅಪಾಯ ಡ್ಯಾಶ್‌ಬೋರ್ಡ್",
+            "incidents": "ಘಟನೆ ನಿರ್ವಹಣೆ",
+            "analytics": "ವಿಶ್ಲೇಷಣೆ",
+            "users": "ಬಳಕೆದಾರ ನಿರ್ವಹಣೆ",
+            "volunteers": "ಸ್ವಯಂಸೇವಕ ಅನುಮೋದನೆ",
+            "ngo": "ಎನ್‌ಜಿಒ ಅನುಮೋದನೆ"
+        }
+    },
+    "ngo": {
+        "escalated": "ವರ್ಗಾಯಿಸಲಾಗಿದೆ",
+        "emergencies": "ತುರ್ತು ಪರಿಸ್ಥಿತಿಗಳು",
+        "volunteers": "ಲಭ್ಯವಿರುವ ಸ್ವಯಂಸೇವಕರು",
+        "regions": "ಪ್ರದೇಶಗಳು",
+        "regionsCovered": "ಆವರಿಸಲಾದ ಪ್ರದೇಶಗಳು",
+        "noRegions": "ಯಾವುದೇ ಪ್ರದೇಶವನ್ನು ನಿಯೋಜಿಸಲಾಗಿಲ್ಲ"
+    },
+    "superadmin": {
+        "title": "ಸೂಪರ್ ಅಡ್ಮಿನ್",
+        "access": "ಪ್ರವೇಶ",
+        "role": "ಪಾತ್ರ",
+        "tiles": {
+            "admins": "ನಿರ್ವಾಹಕರು",
+            "ngoRequests": "ಎನ್‌ಜಿಒ ವಿನಂತಿಗಳು",
+            "escalations": "ವರ್ಗಾವಣೆಗಳು",
+            "auditLogs": "ಆಡಿಟ್ ಲಾಗ್‌ಗಳು"
+        },
+        "note": "ಈ ಖಾತೆಯು ಕೇವಲ ಮೇಲ್ವಿಚಾರಣೆಗೆ ಮಾತ್ರ ಸೀಮಿತವಾಗಿದೆ. ಚಾಟ್ ಮತ್ತು ಸೇವಾ ವೈಶಿಷ್ಟ್ಯಗಳನ್ನು ನಿಷ್ಕ್ರಿಯಗೊಳಿಸಲಾಗಿದೆ.",
+        "logout": "ಅಧಿವೇಶನ ಮುಕ್ತಾಯಗೊಂಡಿದೆ"
+    },
+    "splash": {
+        "tagline": "You are not alone."
+    },
+    "languageSelection": {
+        "title": "Choose Your Language",
+        "voicePrompt": "Speak your language",
+        "hindi": "हिंदी",
+        "english": "English",
+        "regional": "Regional Language"
+    },
+    "onboarding": {
+        "step1Title": "How would you like to talk?",
+        "voice": "Voice",
+        "voiceRecommended": "Voice (Recommended)",
+        "text": "Text",
+        "voiceDesc": "Speak naturally, we listen",
+        "textDesc": "Type your messages",
+        "step2Title": "What do you enjoy talking about?",
+        "religion": "Religion / Spirituality",
+        "music": "Music",
+        "healthTalk": "Health Talk",
+        "dailyLife": "Daily Life",
+        "step3Title": "Your Privacy Matters",
+        "consentText": "We keep your conversations private and secure. Your information is only used to help connect you with companions and caregivers.",
+        "listenConsent": "Listen to explanation",
+        "agreeText": "I understand and agree",
+        "continue": "Continue"
+    },
+    "register": {
+        "title": "Join SaathiCircle",
+        "subtitle": "Create your account",
+        "name": "Your Name",
+        "phone": "Phone Number",
+        "age": "Your Age",
+        "city": "City",
+        "emergencyContact": "Emergency Contact Number",
+        "createAccount": "Create Account",
+        "existingUser": "Already have an account?",
+        "signIn": "Sign In"
+    },
+    "companion": {
+        "title": "Finding Your Companion",
+        "foundMessage": "We found someone you may enjoy talking to.",
+        "language": "Language",
+        "interest": "Shared Interest",
+        "available": "Available Now",
+        "voiceCall": "Voice Call",
+        "textChat": "Text Chat"
+    },
+    "chat": {
+        "placeholder": "Type a message...",
+        "endCall": "End Call",
+        "prompts": {
+            "memories": "Talk about childhood memories",
+            "news": "Discuss today's news",
+            "song": "Share a favorite song",
+            "family": "Talk about family"
+        }
+    },
+    "help": {
+        "title": "What kind of help do you need?",
+        "emotional": "Emotional Support",
+        "emotionalDesc": "I want someone to talk to",
+        "daily": "Daily Assistance",
+        "dailyDesc": "Medicine, groceries, small help",
+        "health": "Health-Related Help",
+        "healthDesc": "Feeling unwell, need guidance",
+        "safety": "Safety / Emergency",
+        "safetyDesc": "Danger, fall, abuse",
+        "voiceTitle": "Tell us how we can help",
+        "voicePrompt": "Speak freely. We will understand.",
+        "processingTitle": "We are understanding your request...",
+        "processingMessage": "Please wait a moment",
+        "statusTitle": "Help is Coming",
+        "statusSent": "Request Sent",
+        "statusResponding": "Someone is responding",
+        "statusMessage": "Help is on the way. You are not alone.",
+        "callHelper": "Call Helper"
+    },
+    "sos": {
+        "title": "Emergency",
+        "buttonText": "SOS",
+        "voiceHint": "Say \"Help\" anytime",
+        "escalationInfo": "Emergency contacts will be notified",
+        "cancel": "Cancel",
+        "confirmCancel": "Are you sure you want to cancel?"
+    },
+    "profile": {
+        "title": "Profile",
+        "myProfile": "My Profile",
+        "adminProfile": "Admin Profile",
+        "organization": "Organization",
+        "personalInfo": "Personal Information",
+        "contactDetails": "Contact Details",
+        "emergencyContacts": "Emergency Contacts",
+        "healthInfo": "Health Information",
+        "preferences": "Preferences",
+        "helpSupport": "Help & Support",
+        "logout": "Logout",
+        "logoutConfirmTitle": "Logout",
+        "logoutConfirmMessage": "Are you sure you want to logout?",
+        "cancel": "Cancel",
+        "save": "Save Changes",
+        "edit": "Edit",
+        "version": "Version {{version}}",
+        "fields": {
+            "fullName": "Full Name",
+            "phone": "Phone Number",
+            "email": "Email",
+            "age": "Age",
+            "city": "City",
+            "address": "Address",
+            "department": "Department",
+            "contactPerson": "Contact Person",
+            "supportEmail": "Support Email",
+            "ngoName": "NGO Name",
+            "registrationId": "Registration ID",
+            "regions": "Regions",
+            "verification": "Verification",
+            "verified": "Verified",
+            "notVerified": "Not verified",
+            "updateStatus": "Update status: {{status}}"
+        },
+        "stats": {
+            "helped": "Helped",
+            "rating": "Rating",
+            "approved": "Approved",
+            "pending": "Pending",
+            "resolved": "Resolved",
+            "seniors": "Seniors"
+        },
+        "volunteer": {
+            "skills": "Skills",
+            "availability": "Availability",
+            "helpTypes": "Preferred Help Types",
+            "whyVolunteer": "Why I Volunteer",
+            "noSkills": "No skills added",
+            "weekdays": "Weekdays",
+            "weekends": "Weekends",
+            "evenings": "Evenings",
+            "anytime": "Anytime",
+            "emotional": "Emotional",
+            "daily": "Daily",
+            "health": "Health",
+            "emergency": "Emergency",
+            "changesRequireApproval": "Changes require admin approval."
+        },
+        "admin": {
+            "capabilities": "Admin Capabilities",
+            "approveReject": "Approve/Reject Volunteers",
+            "manageSOS": "Manage SOS Alerts",
+            "viewAnalytics": "View Analytics & Reports",
+            "aiRisk": "AI Risk Dashboard Access",
+            "accountSettings": "Account Settings",
+            "notifications": "Notification Preferences",
+            "changePassword": "Change Password",
+            "activityLog": "Activity Log",
+            "notificationOptions": {
+                "sosAlerts": "SOS Alerts",
+                "volunteerRequests": "Volunteer Requests",
+                "systemUpdates": "System Updates",
+                "dailyReports": "Daily Reports",
+                "savePreferences": "Save Preferences"
+            },
+            "close": "Close"
+        },
+        "ngo": {
+            "ngoName": "NGO Name",
+            "registrationId": "Registration ID",
+            "regions": "Regions",
+            "verification": "Verification",
+            "verified": "Verified",
+            "notVerified": "Not Verified",
+            "updateStatus": "Update Status: {{status}}",
+            "contactPerson": "Contact Person",
+            "supportEmail": "Support Email",
+            "requestUpdate": "Request Update",
+            "updateHint": "Changes require admin approval.",
+            "submittedTitle": "Submitted",
+            "submittedMessage": "Your profile change request has been sent for admin approval."
+        }
+    }
+}

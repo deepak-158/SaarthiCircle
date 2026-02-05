@@ -1,9 +1,10 @@
 // Chat/Call Screen with Large Text and Simple Interface
 import React, { useState, useRef, useEffect } from 'react';
-import { 
-  View, 
-  Text, 
-  StyleSheet, 
+import { useTranslation } from 'react-i18next';
+import {
+  View,
+  Text,
+  StyleSheet,
   SafeAreaView,
   ScrollView,
   TextInput,
@@ -15,7 +16,6 @@ import {
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { LargeButton, VoiceButton } from '../../components/common';
 import { colors, typography, spacing, borderRadius, shadows } from '../../theme';
-import { getTranslation } from '../../i18n/translations';
 import { BACKEND_URL } from '../../config/backend';
 import socketService, { getSocket, joinSession, sendMessage as socketSendMessage } from '../../services/socketService';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -34,9 +34,9 @@ const ChatScreen = ({ navigation, route }) => {
   const { activeSession, setCallStatus, addActiveChat, updateActiveChatMessage, removeActiveChat } = useChat();
   const companion = routeCompanion || activeSession?.companion;
   const conversationId = routeConversationId || activeSession?.conversationId;
-  const [language] = useState('en');
-  const t = getTranslation(language);
-  
+
+  const { t } = useTranslation();
+
   const [messages, setMessages] = useState([]);
   const [inputText, setInputText] = useState('');
   const [isSending, setIsSending] = useState(false);
@@ -48,7 +48,7 @@ const ChatScreen = ({ navigation, route }) => {
   const [isWaitingForVolunteer, setIsWaitingForVolunteer] = useState(!conversationId);
   const [isConnecting, setIsConnecting] = useState(false);
   const [isConnected, setIsConnected] = useState(!!conversationId);
-  
+
   const scrollViewRef = useRef();
   const callTimerRef = useRef(null);
   const pulseAnim = useRef(new Animated.Value(1)).current;
@@ -85,7 +85,7 @@ const ChatScreen = ({ navigation, route }) => {
           setCurrentUserId(uid);
           setUserProfile(profile);
         }
-      } catch {}
+      } catch { }
     })();
     return () => {
       mounted = false;
@@ -108,7 +108,7 @@ const ChatScreen = ({ navigation, route }) => {
               timestamp: m.timestamp ? new Date(m.timestamp) : new Date(),
             })));
           }
-        } catch {}
+        } catch { }
       })();
     }
 
@@ -121,14 +121,14 @@ const ChatScreen = ({ navigation, route }) => {
           if (mounted && Array.isArray(json.messages)) {
             setMessages(json.messages.map(normalizeMessage));
           }
-        } catch {}
+        } catch { }
       })();
     }
 
     // Create a unique event listener for this conversation
     const messageHandler = (m) => {
       if (!mounted || !m) return;
-      
+
       // Only process messages for THIS conversation
       if (m.conversation_id !== conversationId && m.conversationId !== conversationId) {
         console.log(`[CHAT] Ignoring message from different conversation. Expecting: ${conversationId}, got: ${m.conversation_id || m.conversationId}`);
@@ -147,7 +147,7 @@ const ChatScreen = ({ navigation, route }) => {
           const localMatchIndex = prev.findIndex(
             msg => msg.id.startsWith('local-') && msg.text === normalized.text
           );
-          
+
           if (localMatchIndex !== -1) {
             // Replace the local optimistic message with the real one from server
             const updated = [...prev];
@@ -155,7 +155,7 @@ const ChatScreen = ({ navigation, route }) => {
             return updated;
           }
         }
-        
+
         return [...prev, normalized];
       });
 
@@ -190,13 +190,13 @@ const ChatScreen = ({ navigation, route }) => {
   // Handle session started (volunteer accepted request)
   useEffect(() => {
     const socket = getSocket();
-    
+
     const sessionStartedHandler = ({ conversationId: cid, seniorId, volunteerId }) => {
       console.log('[CHAT] Session started:', { cid, seniorId, volunteerId });
       setIsWaitingForVolunteer(false);
       setIsConnecting(true);
       setIsConnected(true);
-      
+
       // Small delay to show connecting state
       setTimeout(() => {
         setIsConnecting(false);
@@ -222,7 +222,7 @@ const ChatScreen = ({ navigation, route }) => {
           timestamp: m.timestamp instanceof Date ? m.timestamp.toISOString() : m.timestamp,
         }));
         await AsyncStorage.setItem(cacheKey, JSON.stringify(serializable));
-      } catch {}
+      } catch { }
     })();
   }, [cacheKey, messages]);
 
@@ -323,10 +323,10 @@ const ChatScreen = ({ navigation, route }) => {
           console.log('Error ending chat:', e);
         }
       })();
-      
+
       // Remove from active chats
       removeActiveChat?.(conversationId);
-      
+
       // Emit socket event to notify other participant
       const socket = getSocket();
       if (socket) {
@@ -406,8 +406,8 @@ const ChatScreen = ({ navigation, route }) => {
             {/* Conversation Prompts */}
             <View style={styles.promptsContainer}>
               <Text style={styles.promptsTitle}>Conversation Ideas:</Text>
-              <ScrollView 
-                horizontal 
+              <ScrollView
+                horizontal
                 showsHorizontalScrollIndicator={false}
                 contentContainerStyle={styles.promptsScroll}
               >
@@ -415,7 +415,7 @@ const ChatScreen = ({ navigation, route }) => {
                   <TouchableOpacity
                     key={prompt.id}
                     style={styles.promptCard}
-                    onPress={() => {}}
+                    onPress={() => { }}
                   >
                     <MaterialCommunityIcons
                       name={prompt.icon}
@@ -449,7 +449,7 @@ const ChatScreen = ({ navigation, route }) => {
 
             {/* End Call Button */}
             <LargeButton
-              title={t.chat.endCall}
+              title={t('chat.endCall')}
               onPress={handleEndCall}
               icon="phone-hangup"
               variant="danger"
@@ -483,7 +483,7 @@ const ChatScreen = ({ navigation, route }) => {
       >
         {/* Header */}
         <View style={styles.chatHeader}>
-          <TouchableOpacity 
+          <TouchableOpacity
             onPress={() => navigation.goBack()}
             style={styles.backButton}
           >
@@ -505,7 +505,7 @@ const ChatScreen = ({ navigation, route }) => {
             </View>
           </View>
           <View style={styles.headerButtons}>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.callButton}
               onPress={handleStartVoiceCall}
             >
@@ -515,7 +515,7 @@ const ChatScreen = ({ navigation, route }) => {
                 color={colors.primary.main}
               />
             </TouchableOpacity>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.endChatButton}
               onPress={handleEndChat}
             >
@@ -540,8 +540,8 @@ const ChatScreen = ({ navigation, route }) => {
               key={message.id}
               style={[
                 styles.messageBubble,
-                message.sender === 'user' 
-                  ? styles.userMessage 
+                message.sender === 'user'
+                  ? styles.userMessage
                   : styles.companionMessage,
               ]}
             >
@@ -556,8 +556,8 @@ const ChatScreen = ({ navigation, route }) => {
         </ScrollView>
 
         {/* Conversation Prompts */}
-        <ScrollView 
-          horizontal 
+        <ScrollView
+          horizontal
           showsHorizontalScrollIndicator={false}
           style={styles.chatPromptsContainer}
           contentContainerStyle={styles.chatPromptsContent}
@@ -585,16 +585,16 @@ const ChatScreen = ({ navigation, route }) => {
               color={isListening ? colors.accent.red : colors.primary.main}
             />
           </TouchableOpacity>
-          
+
           <TextInput
             style={styles.textInput}
             value={inputText}
             onChangeText={setInputText}
-            placeholder={t.chat.placeholder}
+            placeholder={t('chat.placeholder')}
             placeholderTextColor={colors.neutral.darkGray}
             multiline
           />
-          
+
           <TouchableOpacity
             style={[
               styles.sendButton,

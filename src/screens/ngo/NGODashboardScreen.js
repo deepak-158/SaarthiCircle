@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   View,
   Text,
@@ -15,6 +16,7 @@ import { BACKEND_URL as API_BASE } from '../../config/backend';
 import { getSocket, identify } from '../../services/socketService';
 
 const NGODashboardScreen = () => {
+  const { t } = useTranslation();
   const [overview, setOverview] = useState(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -100,7 +102,7 @@ const NGODashboardScreen = () => {
               <View style={styles.cardIcon}>
                 <MaterialCommunityIcons name="alert-circle-outline" size={22} color={colors.accent.orange} />
               </View>
-              <Text style={styles.cardLabel}>Escalated</Text>
+              <Text style={styles.cardLabel}>{t('ngo.escalated')}</Text>
               <Text style={styles.cardValue}>{overview?.escalatedActive ?? 0}</Text>
             </View>
 
@@ -108,7 +110,7 @@ const NGODashboardScreen = () => {
               <View style={styles.cardIcon}>
                 <MaterialCommunityIcons name="alarm-light" size={22} color={colors.accent.red} />
               </View>
-              <Text style={styles.cardLabel}>Emergencies</Text>
+              <Text style={styles.cardLabel}>{t('ngo.emergencies')}</Text>
               <Text style={styles.cardValue}>{overview?.emergenciesActive ?? 0}</Text>
             </View>
 
@@ -116,7 +118,7 @@ const NGODashboardScreen = () => {
               <View style={styles.cardIcon}>
                 <MaterialCommunityIcons name="account-group" size={22} color={colors.secondary.green} />
               </View>
-              <Text style={styles.cardLabel}>Available Volunteers</Text>
+              <Text style={styles.cardLabel}>{t('ngo.volunteers')}</Text>
               <Text style={styles.cardValue}>{overview?.availableVolunteers ?? 0}</Text>
             </View>
 
@@ -124,15 +126,15 @@ const NGODashboardScreen = () => {
               <View style={styles.cardIcon}>
                 <MaterialCommunityIcons name="map-marker-radius" size={22} color={colors.primary.main} />
               </View>
-              <Text style={styles.cardLabel}>Regions</Text>
+              <Text style={styles.cardLabel}>{t('ngo.regions')}</Text>
               <Text style={styles.cardValue}>{Array.isArray(overview?.regions) ? overview.regions.length : 0}</Text>
             </View>
           </View>
 
           <View style={styles.regionsCard}>
-            <Text style={styles.regionsTitle}>Regions Covered</Text>
+            <Text style={styles.regionsTitle}>{t('ngo.regionsCovered')}</Text>
             <Text style={styles.regionsValue}>
-              {Array.isArray(overview?.regions) && overview.regions.length ? overview.regions.join(', ') : 'No regions assigned'}
+              {Array.isArray(overview?.regions) && overview.regions.length ? overview.regions.join(', ') : t('ngo.noRegions')}
             </Text>
           </View>
         </ScrollView>

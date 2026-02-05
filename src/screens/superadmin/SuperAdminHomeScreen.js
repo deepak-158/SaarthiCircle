@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   View,
   Text,
@@ -15,6 +16,7 @@ import { BACKEND_URL as API_BASE } from '../../config/backend';
 import { logout } from '../../services/authService';
 
 const SuperAdminHomeScreen = ({ navigation }) => {
+  const { t } = useTranslation();
   const [token, setToken] = useState(null);
   const [loading, setLoading] = useState(true);
   const [health, setHealth] = useState(null);
@@ -53,7 +55,7 @@ const SuperAdminHomeScreen = ({ navigation }) => {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>SuperAdmin</Text>
+        <Text style={styles.headerTitle}>{t('superadmin.title')}</Text>
         <TouchableOpacity
           style={styles.logoutBtn}
           onPress={async () => {
@@ -77,32 +79,32 @@ const SuperAdminHomeScreen = ({ navigation }) => {
       ) : (
         <View style={styles.content}>
           <View style={styles.card}>
-            <Text style={styles.cardTitle}>Access</Text>
-            <Text style={styles.cardSub}>Role: {health?.role || 'unknown'}</Text>
+            <Text style={styles.cardTitle}>{t('superadmin.access')}</Text>
+            <Text style={styles.cardSub}>{t('superadmin.role')}: {health?.role || 'unknown'}</Text>
           </View>
 
           <View style={styles.grid}>
             <TouchableOpacity style={styles.tile} onPress={() => navigation.navigate('SuperAdminAdmins')}>
               <MaterialCommunityIcons name="shield-account" size={26} color={colors.primary.main} />
-              <Text style={styles.tileText}>Admins</Text>
+              <Text style={styles.tileText}>{t('superadmin.tiles.admins')}</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.tile} onPress={() => navigation.navigate('SuperAdminNgoRequests')}>
               <MaterialCommunityIcons name="office-building" size={26} color={colors.primary.main} />
-              <Text style={styles.tileText}>NGO Requests</Text>
+              <Text style={styles.tileText}>{t('superadmin.tiles.ngoRequests')}</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.tile} onPress={() => navigation.navigate('SuperAdminEscalations')}>
               <MaterialCommunityIcons name="alert-decagram" size={26} color={colors.primary.main} />
-              <Text style={styles.tileText}>Escalations</Text>
+              <Text style={styles.tileText}>{t('superadmin.tiles.escalations')}</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.tile} onPress={() => navigation.navigate('SuperAdminAuditLogs')}>
               <MaterialCommunityIcons name="clipboard-text" size={26} color={colors.primary.main} />
-              <Text style={styles.tileText}>Audit Logs</Text>
+              <Text style={styles.tileText}>{t('superadmin.tiles.auditLogs')}</Text>
             </TouchableOpacity>
           </View>
 
           <View style={styles.note}>
             <Text style={styles.noteText}>
-              This account is restricted to oversight only. Chat and service features are disabled.
+              {t('superadmin.note')}
             </Text>
           </View>
         </View>

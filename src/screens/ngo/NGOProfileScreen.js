@@ -14,9 +14,11 @@ import {
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { colors, spacing, typography } from '../../theme';
+import { useTranslation } from 'react-i18next';
 import { BACKEND_URL as API_BASE } from '../../config/backend';
 
 const NGOProfileScreen = () => {
+  const { t } = useTranslation();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -32,8 +34,8 @@ const NGOProfileScreen = () => {
     const regions = Array.isArray(profile?.ngo_regions)
       ? profile.ngo_regions
       : Array.isArray(profile?.regions)
-      ? profile.regions
-      : [];
+        ? profile.regions
+        : [];
     const registrationNumber = profile?.registration_number || profile?.registrationNumber || '—';
     const status = profile?.ngo_profile_update_status || profile?.profile_update_status || null;
     return { ngoName, verified, regions, registrationNumber, status };
@@ -47,7 +49,7 @@ const NGOProfileScreen = () => {
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await resp.json();
-      if (!resp.ok) throw new Error(data?.error || 'Failed to load profile');
+      if (!resp.ok) throw new Error(data?.error || t('common.error'));
 
       const ngo = data?.ngo;
       setProfile(ngo || null);
@@ -97,10 +99,10 @@ const NGOProfileScreen = () => {
         await AsyncStorage.setItem('userProfile', JSON.stringify(data.ngo));
       }
 
-      Alert.alert('Submitted', 'Your profile change request has been sent for admin approval.');
+      Alert.alert(t('profile.ngo.submittedTitle'), t('profile.ngo.submittedMessage'));
       await loadProfile();
     } catch (e) {
-      Alert.alert('Error', e.message || 'Request failed');
+      Alert.alert(t('common.error'), e.message || t('common.error'));
     } finally {
       setSaving(false);
     }
@@ -111,7 +113,7 @@ const NGOProfileScreen = () => {
       {loading ? (
         <View style={styles.loading}>
           <ActivityIndicator size="large" color={colors.primary.main} />
-          <Text style={styles.loadingText}>Loading profile...</Text>
+          <Text style={styles.loadingText}>{t('common.loading')}</Text>
         </View>
       ) : (
         <ScrollView
@@ -120,25 +122,25 @@ const NGOProfileScreen = () => {
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         >
           <View style={styles.card}>
-            <Text style={styles.sectionTitle}>Organization</Text>
+            <Text style={styles.sectionTitle}>{t('profile.organization')}</Text>
 
             <View style={styles.row}>
-              <Text style={styles.label}>NGO Name</Text>
+              <Text style={styles.label}>{t('profile.ngo.ngoName')}</Text>
               <Text style={styles.value}>{derived.ngoName}</Text>
             </View>
 
             <View style={styles.row}>
-              <Text style={styles.label}>Registration ID</Text>
+              <Text style={styles.label}>{t('profile.ngo.registrationId')}</Text>
               <Text style={styles.value}>{derived.registrationNumber}</Text>
             </View>
 
             <View style={styles.row}>
-              <Text style={styles.label}>Regions</Text>
+              <Text style={styles.label}>{t('profile.ngo.regions')}</Text>
               <Text style={styles.value}>{derived.regions.length ? derived.regions.join(', ') : '—'}</Text>
             </View>
 
             <View style={styles.row}>
-              <Text style={styles.label}>Verification</Text>
+              <Text style={styles.label}>{t('profile.ngo.verification')}</Text>
               <View style={styles.inline}>
                 <MaterialCommunityIcons
                   name={derived.verified ? 'check-decagram' : 'alert-circle-outline'}
@@ -146,7 +148,7 @@ const NGOProfileScreen = () => {
                   color={derived.verified ? colors.secondary.green : colors.neutral.gray}
                 />
                 <Text style={[styles.value, { marginLeft: spacing.xs }]}>
-                  {derived.verified ? 'Verified' : 'Not verified'}
+                  {derived.verified ? t('profile.ngo.verified') : t('profile.ngo.notVerified')}
                 </Text>
               </View>
             </View>
@@ -154,39 +156,39 @@ const NGOProfileScreen = () => {
             {derived.status && (
               <View style={styles.notice}>
                 <MaterialCommunityIcons name="clock-outline" size={18} color={colors.accent.orange} />
-                <Text style={styles.noticeText}>Update status: {String(derived.status).toUpperCase()}</Text>
+                <Text style={styles.noticeText}>{t('profile.ngo.updateStatus', { status: String(derived.status).toUpperCase() })}</Text>
               </View>
             )}
           </View>
 
           <View style={styles.card}>
-            <Text style={styles.sectionTitle}>Contact Details</Text>
+            <Text style={styles.sectionTitle}>{t('profile.contactDetails')}</Text>
 
-            <Text style={styles.inputLabel}>Contact Person</Text>
+            <Text style={styles.inputLabel}>{t('profile.ngo.contactPerson')}</Text>
             <TextInput
               style={styles.input}
               value={contactPerson}
               onChangeText={setContactPerson}
-              placeholder="Enter contact person"
+              placeholder={t('profile.ngo.contactPerson')}
               placeholderTextColor={colors.neutral.gray}
             />
 
-            <Text style={styles.inputLabel}>Phone</Text>
+            <Text style={styles.inputLabel}>{t('profile.fields.phone')}</Text>
             <TextInput
               style={styles.input}
               value={phone}
               onChangeText={setPhone}
-              placeholder="Enter phone"
+              placeholder={t('profile.fields.phone')}
               placeholderTextColor={colors.neutral.gray}
               keyboardType="phone-pad"
             />
 
-            <Text style={styles.inputLabel}>Support Email</Text>
+            <Text style={styles.inputLabel}>{t('profile.ngo.supportEmail')}</Text>
             <TextInput
               style={styles.input}
               value={email}
               onChangeText={setEmail}
-              placeholder="Enter email"
+              placeholder={t('profile.ngo.supportEmail')}
               placeholderTextColor={colors.neutral.gray}
               keyboardType="email-address"
               autoCapitalize="none"
@@ -196,12 +198,12 @@ const NGOProfileScreen = () => {
               {saving ? (
                 <ActivityIndicator color={colors.neutral.white} size="small" />
               ) : (
-                <Text style={styles.primaryBtnText}>Request Update</Text>
+                <Text style={styles.primaryBtnText}>{t('profile.ngo.requestUpdate')}</Text>
               )}
             </TouchableOpacity>
 
             <Text style={styles.hintText}>
-              Changes require admin approval.
+              {t('profile.ngo.updateHint')}
             </Text>
           </View>
         </ScrollView>

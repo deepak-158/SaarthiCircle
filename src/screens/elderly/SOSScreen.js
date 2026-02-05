@@ -1,9 +1,10 @@
 // SOS Emergency Screen - Critical emergency feature
 import React, { useState, useEffect, useRef } from 'react';
-import { 
-  View, 
-  Text, 
-  StyleSheet, 
+import { useTranslation } from 'react-i18next';
+import {
+  View,
+  Text,
+  StyleSheet,
   SafeAreaView,
   TouchableOpacity,
   Animated,
@@ -17,24 +18,22 @@ import * as Haptics from 'expo-haptics';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LargeButton } from '../../components/common';
 import { colors, typography, spacing, borderRadius, shadows } from '../../theme';
-import { getTranslation } from '../../i18n/translations';
 import { BACKEND_URL as API_BASE } from '../../config/backend';
 
 const SOSScreen = ({ navigation }) => {
-  const [language] = useState('en');
-  const t = getTranslation(language);
-  
+  const { t } = useTranslation();
+
   const [isActivated, setIsActivated] = useState(false);
   const [countdown, setCountdown] = useState(5);
   const [isSent, setIsSent] = useState(false);
   const [userProfile, setUserProfile] = useState(null);
   const [emergencyContacts, setEmergencyContacts] = useState([]);
-  
+
   const pulseAnim = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
     loadUserData();
-    
+
     // Continuous pulse animation
     Animated.loop(
       Animated.sequence([
@@ -58,7 +57,7 @@ const SOSScreen = ({ navigation }) => {
       if (profileJson) {
         const profile = JSON.parse(profileJson);
         setUserProfile(profile);
-        
+
         // Load emergency contacts
         const contactsJson = await AsyncStorage.getItem('emergencyContacts');
         if (contactsJson) {
@@ -126,12 +125,12 @@ const SOSScreen = ({ navigation }) => {
     // Try to call first emergency contact or 112
     const primaryContact = emergencyContacts.find(c => c.isPrimary) || emergencyContacts[0];
     const phoneNumber = primaryContact?.phone || '112';
-    
+
     try {
-      const url = Platform.OS === 'ios' 
-        ? `telprompt:${phoneNumber}` 
+      const url = Platform.OS === 'ios'
+        ? `telprompt:${phoneNumber}`
         : `tel:${phoneNumber}`;
-      
+
       const canOpen = await Linking.canOpenURL(url);
       if (canOpen) {
         await Linking.openURL(url);
@@ -149,7 +148,7 @@ const SOSScreen = ({ navigation }) => {
       const timer = setInterval(() => {
         setCountdown((prev) => prev - 1);
         if (Platform.OS !== 'web') {
-          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {});
+          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => { });
         }
         Vibration.vibrate(500);
       }, 1000);
@@ -159,9 +158,9 @@ const SOSScreen = ({ navigation }) => {
       // Send SOS
       setIsSent(true);
       if (Platform.OS !== 'web') {
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => { });
       }
-      
+
       // Actually send the SOS alert
       (async () => {
         const result = await sendSOSAlert();
@@ -169,13 +168,13 @@ const SOSScreen = ({ navigation }) => {
           // No internet / backend failed: fallback channels still work
           try {
             await callEmergencyContact();
-          } catch {}
+          } catch { }
           try {
             await sendSmsFallback();
-          } catch {}
+          } catch { }
         }
       })();
-      
+
       // Try to call emergency contact
       setTimeout(() => {
         Alert.alert(
@@ -183,8 +182,8 @@ const SOSScreen = ({ navigation }) => {
           'Would you like to call your emergency contact now?',
           [
             { text: 'No', style: 'cancel' },
-            { 
-              text: 'Yes, Call Now', 
+            {
+              text: 'Yes, Call Now',
               onPress: callEmergencyContact,
               style: 'default',
             },
@@ -196,19 +195,19 @@ const SOSScreen = ({ navigation }) => {
 
   const handleSOSPress = () => {
     if (Platform.OS !== 'web') {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => {});
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy).catch(() => { });
     }
     setIsActivated(true);
   };
 
   const handleCancel = () => {
     Alert.alert(
-      t.sos.confirmCancel,
+      t('sos.confirmCancel'),
       '',
       [
         { text: 'No', style: 'cancel' },
-        { 
-          text: 'Yes', 
+        {
+          text: 'Yes',
           style: 'destructive',
           onPress: () => {
             setIsActivated(false);
@@ -237,7 +236,7 @@ const SOSScreen = ({ navigation }) => {
                 color={colors.neutral.white}
               />
             </View>
-            
+
             <Text style={styles.sentTitle}>SOS Alert Sent!</Text>
             <Text style={styles.sentSubtitle}>
               Emergency contacts have been notified.
@@ -246,9 +245,9 @@ const SOSScreen = ({ navigation }) => {
 
             <View style={styles.contactsCard}>
               <Text style={styles.contactsTitle}>Quick Call:</Text>
-              
+
               {/* Emergency Services */}
-              <TouchableOpacity 
+              <TouchableOpacity
                 style={styles.contactItem}
                 onPress={() => Linking.openURL('tel:112')}
               >
@@ -257,7 +256,7 @@ const SOSScreen = ({ navigation }) => {
                 <MaterialCommunityIcons name="phone" size={20} color={colors.accent.yellow} />
               </TouchableOpacity>
 
-              <TouchableOpacity 
+              <TouchableOpacity
                 style={styles.contactItem}
                 onPress={() => Linking.openURL('tel:108')}
               >
@@ -266,7 +265,7 @@ const SOSScreen = ({ navigation }) => {
                 <MaterialCommunityIcons name="phone" size={20} color={colors.accent.yellow} />
               </TouchableOpacity>
 
-              <TouchableOpacity 
+              <TouchableOpacity
                 style={styles.contactItem}
                 onPress={() => Linking.openURL('tel:100')}
               >
@@ -276,7 +275,7 @@ const SOSScreen = ({ navigation }) => {
               </TouchableOpacity>
 
               {emergencyContacts.length > 0 && emergencyContacts[0].phone && (
-                <TouchableOpacity 
+                <TouchableOpacity
                   style={styles.contactItem}
                   onPress={() => Linking.openURL(`tel:${emergencyContacts[0].phone}`)}
                 >
@@ -312,7 +311,7 @@ const SOSScreen = ({ navigation }) => {
       <SafeAreaView style={styles.safeArea}>
         {/* Header */}
         <View style={styles.header}>
-          <TouchableOpacity 
+          <TouchableOpacity
             onPress={handleGoBack}
             style={styles.backButton}
           >
@@ -322,7 +321,7 @@ const SOSScreen = ({ navigation }) => {
               color={colors.neutral.white}
             />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>{t.sos.title}</Text>
+          <Text style={styles.headerTitle}>{t('sos.title')}</Text>
           <View style={{ width: 48 }} />
         </View>
 
@@ -353,7 +352,7 @@ const SOSScreen = ({ navigation }) => {
                     size={60}
                     color={colors.neutral.white}
                   />
-                  <Text style={styles.sosText}>{t.sos.buttonText}</Text>
+                  <Text style={styles.sosText}>{t('sos.buttonText')}</Text>
                 </>
               )}
             </TouchableOpacity>
@@ -361,7 +360,7 @@ const SOSScreen = ({ navigation }) => {
 
           {/* Status Text */}
           <Text style={styles.statusText}>
-            {isActivated 
+            {isActivated
               ? `Sending in ${countdown} seconds...`
               : 'Press and hold for emergency'
             }
@@ -374,7 +373,7 @@ const SOSScreen = ({ navigation }) => {
               size={24}
               color={colors.neutral.white}
             />
-            <Text style={styles.voiceHintText}>{t.sos.voiceHint}</Text>
+            <Text style={styles.voiceHintText}>{t('sos.voiceHint')}</Text>
           </View>
 
           {/* Escalation Info */}
@@ -384,13 +383,13 @@ const SOSScreen = ({ navigation }) => {
               size={24}
               color={colors.accent.yellow}
             />
-            <Text style={styles.infoText}>{t.sos.escalationInfo}</Text>
+            <Text style={styles.infoText}>{t('sos.escalationInfo')}</Text>
           </View>
 
           {/* Cancel Button */}
           {isActivated && (
             <LargeButton
-              title={t.sos.cancel}
+              title={t('sos.cancel')}
               onPress={handleCancel}
               variant="outline"
               size="lg"
@@ -404,21 +403,21 @@ const SOSScreen = ({ navigation }) => {
         <View style={styles.emergencyNumbers}>
           <Text style={styles.emergencyTitle}>Emergency Numbers:</Text>
           <View style={styles.numberRow}>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.numberItem}
               onPress={() => Linking.openURL('tel:100')}
             >
               <Text style={styles.numberLabel}>Police</Text>
               <Text style={styles.number}>100</Text>
             </TouchableOpacity>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.numberItem}
               onPress={() => Linking.openURL('tel:108')}
             >
               <Text style={styles.numberLabel}>Ambulance</Text>
               <Text style={styles.number}>108</Text>
             </TouchableOpacity>
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.numberItem}
               onPress={() => Linking.openURL('tel:112')}
             >

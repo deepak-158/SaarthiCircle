@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useTranslation } from 'react-i18next';
 import { colors, typography, spacing } from '../../theme';
 import { LargeButton, LargeCard } from '../../components/common';
 import { logout } from '../../services/authService';
@@ -31,6 +32,7 @@ const DEFAULT_USER = {
 };
 
 const ProfileScreen = ({ navigation }) => {
+  const { t } = useTranslation();
   const [user, setUser] = useState(DEFAULT_USER);
   const [loading, setLoading] = useState(true);
 
@@ -42,7 +44,7 @@ const ProfileScreen = ({ navigation }) => {
     try {
       setLoading(true);
       const token = await AsyncStorage.getItem('userToken');
-      
+
       // Try fetching fresh profile from backend
       try {
         const resp = await fetch(`${API_BASE}/me`, {
@@ -85,7 +87,7 @@ const ProfileScreen = ({ navigation }) => {
 
   const handleLogout = async () => {
     if (Platform.OS === 'web') {
-      const confirmed = window.confirm('Are you sure you want to logout?');
+      const confirmed = window.confirm(t('profile.logoutConfirmMessage'));
       if (confirmed) {
         await logout();
       }
@@ -93,12 +95,12 @@ const ProfileScreen = ({ navigation }) => {
     }
 
     Alert.alert(
-      'Logout',
-      'Are you sure you want to logout?',
+      t('profile.logoutConfirmTitle'),
+      t('profile.logoutConfirmMessage'),
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: t('profile.cancel'), style: 'cancel' },
         {
-          text: 'Logout',
+          text: t('profile.logout'),
           style: 'destructive',
           onPress: async () => {
             await logout();
@@ -112,35 +114,35 @@ const ProfileScreen = ({ navigation }) => {
   const menuItems = [
     {
       id: 'personal',
-      title: 'Personal Information',
+      title: t('profile.personalInfo'),
       icon: 'account-circle',
-      subtitle: 'Name, phone, address',
+      subtitle: t('profile.fields.fullName') + ', ' + t('profile.fields.phone'),
       screen: 'PersonalInfo',
     },
     {
       id: 'emergency',
-      title: 'Emergency Contacts',
+      title: t('profile.emergencyContacts'),
       icon: 'phone-alert',
-      subtitle: 'Add family contacts',
+      subtitle: t('profile.fields.contactDetails'),
       screen: 'EmergencyContacts',
     },
     {
       id: 'health',
-      title: 'Health Information',
+      title: t('profile.healthInfo'),
       icon: 'heart-pulse',
-      subtitle: 'Medical conditions, medications',
+      subtitle: t('profile.fields.age'),
       screen: 'HealthInfo',
     },
     {
       id: 'preferences',
-      title: 'Preferences',
+      title: t('profile.preferences'),
       icon: 'cog',
-      subtitle: 'Language, notifications',
+      subtitle: t('profile.fields.address'),
       screen: 'Preferences',
     },
     {
       id: 'help',
-      title: 'Help & Support',
+      title: t('profile.helpSupport'),
       icon: 'help-circle',
       subtitle: 'FAQs, contact support',
       screen: 'HelpSupport',
@@ -152,17 +154,17 @@ const ProfileScreen = ({ navigation }) => {
       <ScrollView showsVerticalScrollIndicator={false}>
         {/* Header */}
         <View style={styles.header}>
-          <TouchableOpacity 
+          <TouchableOpacity
             style={styles.backButton}
             onPress={() => navigation.goBack()}
           >
-            <MaterialCommunityIcons 
-              name="arrow-left" 
-              size={28} 
-              color={colors.primary.main} 
+            <MaterialCommunityIcons
+              name="arrow-left"
+              size={28}
+              color={colors.primary.main}
             />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Profile</Text>
+          <Text style={styles.headerTitle}>{t('profile.title')}</Text>
           <View style={styles.placeholder} />
         </View>
 
@@ -177,7 +179,7 @@ const ProfileScreen = ({ navigation }) => {
             <Text style={styles.userLocation}>📍 {user.city}</Text>
           )}
           {user.age && (
-            <Text style={styles.userAge}>{user.age} years old</Text>
+            <Text style={styles.userAge}>{user.age} {t('profile.fields.age')}</Text>
           )}
         </View>
 
@@ -190,20 +192,20 @@ const ProfileScreen = ({ navigation }) => {
               onPress={() => navigation.navigate(item.screen)}
             >
               <View style={styles.menuIconContainer}>
-                <MaterialCommunityIcons 
-                  name={item.icon} 
-                  size={28} 
-                  color={colors.primary.main} 
+                <MaterialCommunityIcons
+                  name={item.icon}
+                  size={28}
+                  color={colors.primary.main}
                 />
               </View>
               <View style={styles.menuTextContainer}>
                 <Text style={styles.menuTitle}>{item.title}</Text>
                 <Text style={styles.menuSubtitle}>{item.subtitle}</Text>
               </View>
-              <MaterialCommunityIcons 
-                name="chevron-right" 
-                size={24} 
-                color={colors.neutral.gray} 
+              <MaterialCommunityIcons
+                name="chevron-right"
+                size={24}
+                color={colors.neutral.gray}
               />
             </TouchableOpacity>
           ))}
@@ -212,7 +214,7 @@ const ProfileScreen = ({ navigation }) => {
         {/* Logout Button */}
         <View style={styles.logoutContainer}>
           <LargeButton
-            title="Logout"
+            title={t('profile.logout')}
             onPress={handleLogout}
             variant="outline"
             icon="logout"
@@ -220,7 +222,7 @@ const ProfileScreen = ({ navigation }) => {
         </View>
 
         {/* App Version */}
-        <Text style={styles.versionText}>SaathiCircle v1.0.0</Text>
+        <Text style={styles.versionText}>{t('profile.version', { version: '1.0.0' })}</Text>
       </ScrollView>
     </SafeAreaView>
   );

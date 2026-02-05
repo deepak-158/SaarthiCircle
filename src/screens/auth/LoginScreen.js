@@ -15,9 +15,11 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { colors, typography, spacing } from '../../theme';
+import { colors, typography, spacing, shadows } from '../../theme';
 import { BACKEND_URL } from '../../config/backend';
 import { login as authLogin } from '../../services/authService';
+import { useTranslation } from 'react-i18next';
+import { Modal } from 'react-native';
 
 const LoginScreen = ({ navigation }) => {
   const [email, setEmail] = useState('');
@@ -26,6 +28,26 @@ const LoginScreen = ({ navigation }) => {
   const [showOtpInput, setShowOtpInput] = useState(false);
   const [loading, setLoading] = useState(false);
   const [step, setStep] = useState('credentials');
+  const [showLanguageModal, setShowLanguageModal] = useState(false);
+  const { t, i18n } = useTranslation();
+
+  const LANGUAGES = [
+    { code: 'en', label: 'English', native: 'English' },
+    { code: 'hi', label: 'Hindi', native: 'हिन्दी' },
+    { code: 'bn', label: 'Bengali', native: 'বাংলা' },
+    { code: 'ta', label: 'Tamil', native: 'தமிழ்' },
+    { code: 'te', label: 'Telugu', native: 'తెలుగు' },
+    { code: 'mr', label: 'Marathi', native: 'मराठी' },
+    { code: 'gu', label: 'Gujarati', native: 'ગુજરાતી' },
+    { code: 'kn', label: 'Kannada', native: 'ಕನ್ನಡ' },
+    { code: 'ml', label: 'Malayalam', native: 'മലയാളം' },
+    { code: 'pa', label: 'Punjabi', native: 'ਪੰਜਾਬੀ' },
+  ];
+
+  const changeLanguage = (langCode) => {
+    i18n.changeLanguage(langCode);
+    setShowLanguageModal(false);
+  };
 
   const formatPhoneNumber = (text) => {
     const cleaned = text.replace(/\D/g, '');
@@ -39,12 +61,12 @@ const LoginScreen = ({ navigation }) => {
 
   const handleSendOtp = async () => {
     if (!email.trim() || !validateEmail(email)) {
-      Alert.alert('Invalid Email', 'Please enter a valid email address');
+      Alert.alert(t('login.invalidEmail'), t('login.enterValidEmail'));
       return;
     }
 
     if (phone.length !== 10) {
-      Alert.alert('Invalid Phone', 'Please enter a valid 10-digit phone number');
+      Alert.alert(t('login.invalidPhone'), t('login.enterValidPhone'));
       return;
     }
 
@@ -68,7 +90,7 @@ const LoginScreen = ({ navigation }) => {
 
       setShowOtpInput(true);
       setStep('otp');
-      Alert.alert('OTP Sent', `OTP has been sent to ${email}`, [{ text: 'OK' }]);
+      Alert.alert('OTP Sent', t('login.otpSentTo', { email }), [{ text: t('common.ok') }]);
     } catch (error) {
       console.error('Send OTP error:', error);
       Alert.alert('Error', 'Failed to send OTP. Please try again.');
@@ -95,51 +117,51 @@ const LoginScreen = ({ navigation }) => {
         }),
       });
 
-    const data = await response.json();
+      const data = await response.json();
 
-    if (!response.ok) {
-      Alert.alert('Error', data.error || data.message || 'Invalid OTP');
-      return;
-    }
+      if (!response.ok) {
+        Alert.alert('Error', data.error || data.message || 'Invalid OTP');
+        return;
+      }
 
-    if (data.access_token) {
-      const role = data.user?.role;
-      await authLogin(data.access_token, role || 'user', data.user || {});
+      if (data.access_token) {
+        const role = data.user?.role;
+        await authLogin(data.access_token, role || 'user', data.user || {});
 
-      // If user has no role, redirect to Register screen
-      if (!role) {
-        navigation.reset({
-          index: 0,
-          routes: [{ 
-            name: 'Register', 
-            params: { 
-              email: email.trim(), 
-              phone: `+91${phone}`, 
-              token: data.access_token 
-            } 
-          }],
-        });
-      } else {
-        if (role === 'superadmin') {
-          navigation.reset({ index: 0, routes: [{ name: 'SuperAdminApp' }] });
-        } else if (role === 'admin') {
-          navigation.reset({ index: 0, routes: [{ name: 'AdminApp' }] });
-        } else if (role === 'volunteer') {
-          navigation.reset({ index: 0, routes: [{ name: 'CaregiverApp' }] });
-        } else if (role === 'volunteer_pending') {
-          navigation.reset({ index: 0, routes: [{ name: 'VolunteerPending' }] });
-        } else if (role === 'ngo') {
-          navigation.reset({ index: 0, routes: [{ name: 'NGOApp' }] });
-        } else if (role === 'ngo_pending') {
-          navigation.reset({ index: 0, routes: [{ name: 'NGOPending' }] });
-        } else if (role === 'elderly') {
-          navigation.reset({ index: 0, routes: [{ name: 'ElderlyApp' }] });
+        // If user has no role, redirect to Register screen
+        if (!role) {
+          navigation.reset({
+            index: 0,
+            routes: [{
+              name: 'Register',
+              params: {
+                email: email.trim(),
+                phone: `+91${phone}`,
+                token: data.access_token
+              }
+            }],
+          });
         } else {
-          // Default fallback
-          navigation.reset({ index: 0, routes: [{ name: 'Auth' }] });
+          if (role === 'superadmin') {
+            navigation.reset({ index: 0, routes: [{ name: 'SuperAdminApp' }] });
+          } else if (role === 'admin') {
+            navigation.reset({ index: 0, routes: [{ name: 'AdminApp' }] });
+          } else if (role === 'volunteer') {
+            navigation.reset({ index: 0, routes: [{ name: 'CaregiverApp' }] });
+          } else if (role === 'volunteer_pending') {
+            navigation.reset({ index: 0, routes: [{ name: 'VolunteerPending' }] });
+          } else if (role === 'ngo') {
+            navigation.reset({ index: 0, routes: [{ name: 'NGOApp' }] });
+          } else if (role === 'ngo_pending') {
+            navigation.reset({ index: 0, routes: [{ name: 'NGOPending' }] });
+          } else if (role === 'elderly') {
+            navigation.reset({ index: 0, routes: [{ name: 'ElderlyApp' }] });
+          } else {
+            // Default fallback
+            navigation.reset({ index: 0, routes: [{ name: 'Auth' }] });
+          }
         }
       }
-    }
     } catch (error) {
       console.error('Verify OTP error:', error);
       Alert.alert('Error', 'Failed to verify OTP. Please try again.');
@@ -161,7 +183,7 @@ const LoginScreen = ({ navigation }) => {
           role,
         },
       };
-      
+
       await authLogin(demoProfile.token, role, demoProfile.user);
 
       if (role === 'admin') {
@@ -186,11 +208,11 @@ const LoginScreen = ({ navigation }) => {
       style={styles.container}
     >
       <SafeAreaView style={styles.safeArea}>
-        <KeyboardAvoidingView 
+        <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           style={styles.keyboardView}
         >
-          <ScrollView 
+          <ScrollView
             contentContainerStyle={styles.scrollContent}
             keyboardShouldPersistTaps="handled"
           >
@@ -198,21 +220,31 @@ const LoginScreen = ({ navigation }) => {
               <View style={styles.logoCircle}>
                 <MaterialCommunityIcons name="hand-heart" size={60} color={colors.primary.main} />
               </View>
-              <Text style={styles.appName}>SaathiCircle</Text>
-              <Text style={styles.tagline}>साथी सर्कल</Text>
-              <Text style={styles.subtitle}>Companionship for Seniors</Text>
+              <Text style={styles.appName}>{t('login.appName')}</Text>
+              <Text style={styles.tagline}>{t('login.tagline')}</Text>
             </View>
+
+            {/* Language Selector Button */}
+            <TouchableOpacity
+              style={styles.languageButton}
+              onPress={() => setShowLanguageModal(true)}
+            >
+              <MaterialCommunityIcons name="web" size={24} color={colors.primary.main} />
+              <Text style={styles.languageButtonText}>
+                {LANGUAGES.find(l => l.code === i18n.language)?.native || 'English'}
+              </Text>
+            </TouchableOpacity>
 
             <View style={styles.inputContainer}>
               {!showOtpInput ? (
                 <>
-                  <Text style={styles.inputLabel}>Login / Register</Text>
-                  
+                  <Text style={styles.inputLabel}>{t('login.title')}</Text>
+
                   <View style={styles.inputGroup}>
-                    <Text style={styles.fieldLabel}>Email Address</Text>
+                    <Text style={styles.fieldLabel}>{t('login.emailLabel')}</Text>
                     <TextInput
                       style={styles.input}
-                      placeholder="your@email.com"
+                      placeholder={t('login.emailPlaceholder')}
                       placeholderTextColor={colors.neutral.gray}
                       keyboardType="email-address"
                       value={email}
@@ -222,14 +254,14 @@ const LoginScreen = ({ navigation }) => {
                   </View>
 
                   <View style={styles.inputGroup}>
-                    <Text style={styles.fieldLabel}>Phone Number</Text>
+                    <Text style={styles.fieldLabel}>{t('login.phoneLabel')}</Text>
                     <View style={styles.phoneInputRow}>
                       <View style={styles.countryCode}>
                         <Text style={styles.countryCodeText}>+91</Text>
                       </View>
                       <TextInput
                         style={styles.phoneInput}
-                        placeholder="10-digit number"
+                        placeholder={t('login.phonePlaceholder')}
                         placeholderTextColor={colors.neutral.gray}
                         keyboardType="phone-pad"
                         maxLength={10}
@@ -239,7 +271,7 @@ const LoginScreen = ({ navigation }) => {
                       />
                     </View>
                   </View>
-                  
+
                   <TouchableOpacity
                     style={[
                       styles.primaryButton,
@@ -251,18 +283,18 @@ const LoginScreen = ({ navigation }) => {
                     {loading ? (
                       <ActivityIndicator color={colors.neutral.white} size="small" />
                     ) : (
-                      <Text style={styles.primaryButtonText}>Send OTP</Text>
+                      <Text style={styles.primaryButtonText}>{t('login.sendOtp')}</Text>
                     )}
                   </TouchableOpacity>
                 </>
               ) : (
                 <>
-                  <Text style={styles.inputLabel}>Enter OTP</Text>
-                  <Text style={styles.otpSentText}>OTP sent to {email}</Text>
-                  
+                  <Text style={styles.inputLabel}>{t('login.enterOtp')}</Text>
+                  <Text style={styles.otpSentText}>{t('login.otpSentTo', { email })}</Text>
+
                   <TextInput
                     style={styles.otpInput}
-                    placeholder="Enter 6-digit OTP"
+                    placeholder={t('login.otpPlaceholder')}
                     placeholderTextColor={colors.neutral.gray}
                     keyboardType="number-pad"
                     maxLength={6}
@@ -270,7 +302,7 @@ const LoginScreen = ({ navigation }) => {
                     onChangeText={(text) => setOtp(text.replace(/\D/g, ''))}
                     editable={!loading}
                   />
-                  
+
                   <TouchableOpacity
                     style={[styles.primaryButton, otp.length !== 6 && styles.buttonDisabled]}
                     onPress={handleVerifyOtp}
@@ -279,29 +311,69 @@ const LoginScreen = ({ navigation }) => {
                     {loading ? (
                       <ActivityIndicator color={colors.neutral.white} size="small" />
                     ) : (
-                      <Text style={styles.primaryButtonText}>Verify & Continue</Text>
+                      <Text style={styles.primaryButtonText}>{t('login.verify')}</Text>
                     )}
                   </TouchableOpacity>
 
                   <View style={styles.otpActions}>
                     <TouchableOpacity onPress={() => { setOtp(''); handleSendOtp(); }}>
-                      <Text style={styles.linkText}>Resend OTP</Text>
+                      <Text style={styles.linkText}>{t('login.resendOtp')}</Text>
                     </TouchableOpacity>
                     <TouchableOpacity onPress={() => { setShowOtpInput(false); setOtp(''); }}>
-                      <Text style={styles.linkText}>Change Email/Phone</Text>
+                      <Text style={styles.linkText}>{t('login.changeContact')}</Text>
                     </TouchableOpacity>
                   </View>
                 </>
               )}
 
-              
+
             </View>
 
             <View style={styles.footer}>
-              <Text style={styles.footerText}>By continuing, you agree to our Terms of Service</Text>
+              <Text style={styles.footerText}>{t('login.terms')}</Text>
             </View>
           </ScrollView>
         </KeyboardAvoidingView>
+
+        {/* Language Selection Modal */}
+        <Modal
+          visible={showLanguageModal}
+          transparent={true}
+          animationType="slide"
+          onRequestClose={() => setShowLanguageModal(false)}
+        >
+          <TouchableOpacity
+            style={styles.modalOverlay}
+            activeOpacity={1}
+            onPress={() => setShowLanguageModal(false)}
+          >
+            <View style={styles.modalContent}>
+              <Text style={styles.modalTitle}>Select Language / भाषा चुनें</Text>
+              <ScrollView style={{ maxHeight: 400 }}>
+                {LANGUAGES.map((lang) => (
+                  <TouchableOpacity
+                    key={lang.code}
+                    style={[
+                      styles.languageOption,
+                      i18n.language === lang.code && styles.languageOptionActive
+                    ]}
+                    onPress={() => changeLanguage(lang.code)}
+                  >
+                    <Text style={[
+                      styles.languageOptionText,
+                      i18n.language === lang.code && styles.languageOptionTextActive
+                    ]}>
+                      {lang.native} ({lang.label})
+                    </Text>
+                    {i18n.language === lang.code && (
+                      <MaterialCommunityIcons name="check" size={20} color={colors.primary.main} />
+                    )}
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+          </TouchableOpacity>
+        </Modal>
       </SafeAreaView>
     </LinearGradient>
   );
@@ -367,8 +439,67 @@ const styles = StyleSheet.create({
   demoButtons: { flexDirection: 'row', justifyContent: 'space-between', gap: spacing.sm },
   demoButton: { flex: 1, paddingVertical: spacing.md, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   demoButtonText: { color: colors.neutral.white, fontSize: 12, fontWeight: '600', marginTop: 4 },
-  footer: { marginTop: spacing.xl, alignItems: 'center' },
+  footer: { marginTop: spacing.xl, alignItems: 'center', marginBottom: spacing.xl },
   footerText: { fontSize: 12, color: colors.neutral.gray, textAlign: 'center' },
+  languageButton: {
+    position: 'absolute',
+    top: spacing.md,
+    right: spacing.md,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.8)',
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 20,
+    ...shadows.sm,
+  },
+  languageButtonText: {
+    marginLeft: 6,
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.primary.main,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: colors.neutral.white,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: spacing.lg,
+    paddingBottom: spacing.xxl,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    marginBottom: spacing.lg,
+    textAlign: 'center',
+    color: colors.neutral.black,
+  },
+  languageOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.neutral.lightGray,
+  },
+  languageOptionActive: {
+    backgroundColor: colors.primary.light + '40',
+    borderRadius: 8,
+    paddingHorizontal: spacing.sm,
+    borderBottomWidth: 0,
+  },
+  languageOptionText: {
+    fontSize: 16,
+    color: colors.neutral.darkGray,
+  },
+  languageOptionTextActive: {
+    color: colors.primary.main,
+    fontWeight: 'bold',
+  },
 });
 
 export default LoginScreen;

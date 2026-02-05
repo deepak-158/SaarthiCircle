@@ -1,5 +1,6 @@
 // Voice Call Screen - Full-screen call interface with WebRTC audio implementation
 import React, { useState, useRef, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   View,
   Text,
@@ -18,8 +19,8 @@ import { KeepAwake } from 'expo-keep-awake';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { colors, typography, spacing, borderRadius, shadows } from '../../theme';
 import { getTranslation } from '../../i18n/translations';
-import socketService, { 
-  getSocket, 
+import socketService, {
+  getSocket,
   endVoiceCall,
   sendWebRTCOffer,
   sendWebRTCAnswer,
@@ -64,8 +65,8 @@ const VoiceCallScreen = ({ navigation, route }) => {
   }
   const { conversationId, companion, callerId, calleeId, isIncoming = false } = route.params || {};
   const { voiceCallState, updateCallDuration, endVoiceCall: endCall } = useChat();
-  const [language] = useState('en');
-  const t = getTranslation(language);
+
+  const { t } = useTranslation();
 
   const [currentUserId, setCurrentUserId] = useState(null);
   const [callDuration, setCallDuration] = useState(0);
@@ -296,7 +297,7 @@ const VoiceCallScreen = ({ navigation, route }) => {
     socket.on('call:ringing', ({ conversationId: cid }) => {
       console.log('[CALL] Call is ringing');
       setCallStatus('ringing');
-      
+
       // Start pulsing animation
       Animated.loop(
         Animated.sequence([
@@ -366,7 +367,7 @@ const VoiceCallScreen = ({ navigation, route }) => {
   // Handle end call
   const handleEndCall = () => {
     cleanup();
-    
+
     endVoiceCall({
       conversationId,
       callerId: isIncoming ? calleeId : callerId,

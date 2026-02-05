@@ -1,5 +1,6 @@
 // Incoming Call Overlay - Shows incoming call notification for volunteers
 import React, { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   View,
   Text,
@@ -13,6 +14,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { colors, typography, spacing, borderRadius, shadows } from '../../theme';
 
 const IncomingCallOverlay = ({ visible, callerName, onAccept, onReject, isLoading }) => {
+  const { t } = useTranslation();
   const [scaleAnim] = useState(new Animated.Value(0.8));
   const [ringAnim] = useState(new Animated.Value(0));
 
@@ -91,8 +93,8 @@ const IncomingCallOverlay = ({ visible, callerName, onAccept, onReject, isLoadin
           </View>
 
           {/* Caller Info */}
-          <Text style={styles.callerName}>{callerName || 'Unknown Caller'}</Text>
-          <Text style={styles.callLabel}>Incoming Call</Text>
+          <Text style={styles.callerName}>{callerName || t('calling.unknownCaller')}</Text>
+          <Text style={styles.callLabel}>{t('calling.incomingTitle')}</Text>
 
           {/* Action Buttons */}
           <View style={styles.buttonsContainer}>
@@ -108,7 +110,7 @@ const IncomingCallOverlay = ({ visible, callerName, onAccept, onReject, isLoadin
                 size={36}
                 color={colors.neutral.white}
               />
-              <Text style={styles.buttonText}>Accept</Text>
+              <Text style={styles.buttonText}>{t('calling.accept')}</Text>
             </TouchableOpacity>
 
             {/* Reject Button */}
@@ -123,7 +125,7 @@ const IncomingCallOverlay = ({ visible, callerName, onAccept, onReject, isLoadin
                 size={36}
                 color={colors.neutral.white}
               />
-              <Text style={styles.buttonText}>Reject</Text>
+              <Text style={styles.buttonText}>{t('calling.reject')}</Text>
             </TouchableOpacity>
           </View>
         </Animated.View>

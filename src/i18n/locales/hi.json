@@ -1,0 +1,343 @@
+{
+    "login": {
+        "title": "लॉगिन / रजिस्टर",
+        "emailLabel": "ईमेल पता",
+        "emailPlaceholder": "आपका@email.com",
+        "phoneLabel": "फ़ोन नंबर",
+        "phonePlaceholder": "10-अंकीय नंबर",
+        "sendOtp": "ओटीपी भेजें",
+        "enterOtp": "ओटीपी दर्ज करें",
+        "otpSentTo": "ओटीपी {{email}} पर भेजा गया",
+        "otpPlaceholder": "6-अंकीय ओटीपी दर्ज करें",
+        "verify": "सत्यापित करें और आगे बढ़ें",
+        "resendOtp": "ओटीपी पुनः भेजें",
+        "changeContact": "ईमेल/फ़ोन बदलें",
+        "terms": "जारी रखकर, आप हमारी सेवा की शर्तों से सहमत हैं",
+        "tagline": "बुजुर्गों के लिए साथ",
+        "appName": "साथी सर्कल",
+        "invalidEmail": "अमान्य ईमेल",
+        "invalidPhone": "अमान्य फ़ोन",
+        "enterValidEmail": "कृपया एक मान्य ईमेल पता दर्ज करें",
+        "enterValidPhone": "कृपया एक मान्य 10-अंकीय फ़ोन नंबर दर्ज करें"
+    },
+    "common": {
+        "error": "त्रुटि",
+        "ok": "ठीक है",
+        "loading": "लोड हो रहा है...",
+        "back": "वापस",
+        "next": "आगे",
+        "cancel": "रद्द करें",
+        "confirm": "पुष्टि करें",
+        "save": "सहेजें",
+        "call": "कॉल",
+        "chat": "चैट",
+        "retry": "पुनः प्रयास करें"
+    },
+    "splash": {
+        "tagline": "आप अकेले नहीं हैं।"
+    },
+    "languageSelection": {
+        "title": "अपनी भाषा चुनें",
+        "voicePrompt": "अपनी भाषा बोलें",
+        "hindi": "हिंदी",
+        "english": "English",
+        "regional": "क्षेत्रीय भाषा"
+    },
+    "onboarding": {
+        "step1Title": "आप कैसे बात करना पसंद करेंगे?",
+        "voice": "आवाज़",
+        "voiceRecommended": "आवाज़ (अनुशंसित)",
+        "text": "टेक्स्ट",
+        "voiceDesc": "स्वाभाविक रूप से बोलें, हम सुनते हैं",
+        "textDesc": "अपने संदेश टाइप करें",
+        "step2Title": "आप किस बारे में बात करना पसंद करते हैं?",
+        "religion": "धर्म / आध्यात्मिकता",
+        "music": "संगीत",
+        "healthTalk": "स्वास्थ्य चर्चा",
+        "dailyLife": "दैनिक जीवन",
+        "step3Title": "आपकी गोपनीयता महत्वपूर्ण है",
+        "consentText": "हम आपकी बातचीत को निजी और सुरक्षित रखते हैं। आपकी जानकारी का उपयोग केवल आपको साथियों और देखभालकर्ताओं से जोड़ने के लिए किया जाता है।",
+        "listenConsent": "स्पष्टीकरण सुनें",
+        "agreeText": "मैं समझता/समझती हूं और सहमत हूं",
+        "continue": "जारी रखें"
+    },
+    "register": {
+        "title": "साथीसर्कल में शामिल हों",
+        "subtitle": "अपना खाता बनाएं",
+        "name": "आपका नाम",
+        "phone": "फोन नंबर",
+        "age": "आपकी उम्र",
+        "city": "शहर",
+        "emergencyContact": "आपातकालीन संपर्क नंबर",
+        "createAccount": "खाता बनाएं",
+        "existingUser": "पहले से खाता है?",
+        "signIn": "साइन इन करें"
+    },
+    "companion": {
+        "title": "आपका साथी खोज रहे हैं",
+        "foundMessage": "हमें कोई मिला जिनसे आप बात कर सकते हैं।",
+        "language": "भाषा",
+        "interest": "साझा रुचि",
+        "available": "अभी उपलब्ध",
+        "voiceCall": "वॉयस कॉल",
+        "textChat": "टेक्स्ट चैट"
+    },
+    "chat": {
+        "placeholder": "संदेश लिखें...",
+        "endCall": "कॉल समाप्त करें",
+        "prompts": {
+            "memories": "बचपन की यादों के बारे में बात करें",
+            "news": "आज की खबरों पर चर्चा करें",
+            "song": "पसंदीदा गाना साझा करें",
+            "family": "परिवार के बारे में बात करें"
+        }
+    },
+    "help": {
+        "title": "आपको किस तरह की मदद चाहिए?",
+        "emotional": "भावनात्मक सहारा",
+        "emotionalDesc": "मैं किसी से बात करना चाहता/चाहती हूं",
+        "daily": "दैनिक सहायता",
+        "dailyDesc": "दवाई, किराना, छोटी मदद",
+        "health": "स्वास्थ्य संबंधी मदद",
+        "healthDesc": "तबीयत ठीक नहीं, मार्गदर्शन चाहिए",
+        "safety": "सुरक्षा / आपातकाल",
+        "safetyDesc": "खतरा, गिरना, दुर्व्यवहार",
+        "voiceTitle": "हमें बताएं हम कैसे मदद कर सकते हैं",
+        "voicePrompt": "स्वतंत्र रूप से बोलें। हम समझेंगे।",
+        "processingTitle": "हम आपका अनुरोध समझ रहे हैं...",
+        "processingMessage": "कृपया एक क्षण प्रतीक्षा करें",
+        "statusTitle": "मदद आ रही है",
+        "statusSent": "अनुरोध भेजा गया",
+        "statusResponding": "कोई जवाब दे रहा है",
+        "statusMessage": "मदद रास्ते में है। आप अकेले नहीं हैं।",
+        "callHelper": "सहायक को कॉल करें"
+    },
+    "sos": {
+        "title": "आपातकाल",
+        "buttonText": "SOS",
+        "voiceHint": "कभी भी \"मदद\" बोलें",
+        "escalationInfo": "आपातकालीन संपर्कों को सूचित किया जाएगा",
+        "cancel": "रद्द करें",
+        "confirmCancel": "क्या आप वाकई रद्द करना चाहते हैं?"
+    },
+    "caregiver": {
+        "interaction": {
+            "seniorDetails": "वरिष्ठ नागरिक विवरण",
+            "call": "कॉल करें",
+            "chat": "चैट करें",
+            "location": "स्थान",
+            "helpRequest": "मदद अनुरोध",
+            "type": "प्रकार",
+            "description": "विवरण",
+            "contactInfo": "संपर्क जानकारी",
+            "phone": "फ़ोन",
+            "address": "पता",
+            "emergencyContact": "आपातकालीन संपर्क",
+            "medicalInfo": "चिकित्सा जानकारी",
+            "notes": "नोट्स",
+            "notesPlaceholder": "इस बातचीत के बारे में नोट्स जोड़ें...",
+            "startChat": "इन-ऐप चैट शुरू करें",
+            "markResolved": "समाधान के रूप में चिह्नित करें",
+            "escalate": "एनजीओ/एडमिन को भेजें",
+            "escalateConfirm": "भेजने की पुष्टि करें",
+            "resolveConfirm": "समाधान की पुष्टि करें",
+            "success": "सफल",
+            "error": "त्रुटि"
+        },
+        "session": {
+            "title": "स्वयंसेवक मोड",
+            "subtitle": "वरिष्ठ नागरिकों से जुड़ने के लिए ऑनलाइन आएं",
+            "waiting": "मिलान की प्रतीक्षा कर रहे हैं...",
+            "incomingRequest": "आने वाला {{type}} अनुरोध...",
+            "goOnline": "ऑनलाइन जाएं",
+            "goOffline": "ऑफलाइन जाएं",
+            "acceptVoice": "वॉयस कॉल स्वीकार करें",
+            "acceptSupport": "सहायता अनुरोध स्वीकार करें",
+            "acceptChat": "चैट स्वीकार करें"
+        },
+        "dashboard": {
+            "welcomeBack": "वापसी पर स्वागत है",
+            "pending": "लंबित",
+            "completed": "पूर्ण",
+            "rating": "रेटिंग",
+            "online": "ऑनलाइन",
+            "offline": "ऑफलाइन",
+            "pendingBanner": "आवेदन अनुमोदन लंबित है। हमारी टीम आपकी प्रोफ़ाइल की समीक्षा कर रही है।",
+            "tabs": {
+                "pending": "लंबित अनुरोध",
+                "active": "सक्रिय",
+                "history": "इतिहास"
+            },
+            "empty": {
+                "pending": "कोई लंबित अनुरोध नहीं",
+                "active": "कोई सक्रिय कार्य नहीं",
+                "history": "अभी तक कोई पूर्ण कार्य नहीं"
+            },
+            "actions": {
+                "decline": "अस्वीकार करें",
+                "accept": "स्वीकार करें",
+                "viewDetails": "विवरण देखें",
+                "markDone": "हो गया चिह्नित करें"
+            },
+            "sosAlerts": "{{count}} एसओएस अलर्ट"
+        }
+    },
+    "calling": {
+        "incomingTitle": "आने वाली कॉल",
+        "unknownCaller": "अज्ञात कॉलर",
+        "accept": "स्वीकार करें",
+        "reject": "अस्वीकार करें"
+    },
+    "home": {
+        "greeting": "नमस्ते, मित्र!",
+        "safeMessage": "हम यहां आपके लिए 24/7 हैं",
+        "talkToCompanion": "साथी से बात करें",
+        "needHelp": "मुझे मदद चाहिए",
+        "emergency": "आपातकालीन एसओएस",
+        "moodQuestion": "आज आप कैसा महसूस कर रहे हैं?",
+        "quickHelpTitle": "बात करने की ज़रूरत है?",
+        "quickHelpSubtitle": "हम यहां आपके लिए 24/7 हैं"
+    },
+    "mood": {
+        "voicePrompt": "हमें बताएं कैसा लग रहा है..."
+    },
+    "admin": {
+        "welcome": "वापसी पर स्वागत है,",
+        "stats": {
+            "totalSeniors": "कुल वरिष्ठ नागरिक",
+            "activeCaregivers": "सक्रिय देखभालकर्ता",
+            "pendingRequests": "लंबित अनुरोध",
+            "helpResolved": "मदद समाधान"
+        },
+        "sections": {
+            "keyMetrics": "मुख्य मेट्रिक्स",
+            "quickActions": "त्वरित कार्रवाई",
+            "recentActivity": "हाल की गतिविधि",
+            "viewAll": "सभी देखें"
+        },
+        "actions": {
+            "aiRisk": "एआई जोखिम डैशबोर्ड",
+            "incidents": "घटना प्रबंधन",
+            "analytics": "एनालिटिक्स",
+            "users": "उपयोगकर्ता प्रबंधन",
+            "volunteers": "स्वयंसेवक अनुमोदन",
+            "ngo": "एनजीओ अनुमोदन"
+        }
+    },
+    "ngo": {
+        "escalated": "एस्केलेटेड",
+        "emergencies": "आपात स्थिति",
+        "volunteers": "उपलब्ध स्वयंसेवक",
+        "regions": "क्षेत्र",
+        "regionsCovered": "कवर किए गए क्षेत्र",
+        "noRegions": "कोई क्षेत्र निर्दिष्ट नहीं"
+    },
+    "superadmin": {
+        "title": "सुपर एडमिन",
+        "access": "एक्सेस",
+        "role": "भूमिका",
+        "tiles": {
+            "admins": "एडमिन",
+            "ngoRequests": "एनजीओ अनुरोध",
+            "escalations": "एस्केलेशन",
+            "auditLogs": "ऑडिट लॉग"
+        },
+        "note": "यह खाता केवल निगरानी तक सीमित है। चैट और सेवा सुविधाएं अक्षम हैं।",
+        "logout": "सत्र समाप्त"
+    },
+    "profile": {
+        "title": "प्रोफ़ाइल",
+        "myProfile": "मेरी प्रोफ़ाइल",
+        "adminProfile": "एडमिन प्रोफ़ाइल",
+        "organization": "संगठन",
+        "personalInfo": "व्यक्तिगत जानकारी",
+        "contactDetails": "संपर्क विवरण",
+        "emergencyContacts": "आपातकालीन संपर्क",
+        "healthInfo": "स्वास्थ्य जानकारी",
+        "preferences": "पसंद",
+        "helpSupport": "मदद और समर्थन",
+        "logout": "लॉग आउट",
+        "logoutConfirmTitle": "लॉग आउट",
+        "logoutConfirmMessage": "क्या आप वाकई लॉग आउट करना चाहते हैं?",
+        "cancel": "रद्द करें",
+        "save": "परिवर्तन सहेजें",
+        "edit": "संपादित करें",
+        "version": "संस्करण {{version}}",
+        "fields": {
+            "fullName": "पूरा नाम",
+            "phone": "फ़ोन नंबर",
+            "email": "ईमेल",
+            "age": "उम्र",
+            "city": "शहर",
+            "address": "पता",
+            "department": "विभाग",
+            "contactPerson": "संपर्क व्यक्ति",
+            "supportEmail": "समर्थन ईमेल",
+            "ngoName": "एनजीओ का नाम",
+            "registrationId": "पंजीकरण आईडी",
+            "regions": "क्षेत्र",
+            "verification": "सत्यापन",
+            "verified": "सत्यापित",
+            "notVerified": "सत्यापित नहीं",
+            "updateStatus": "अपडेट स्थिति: {{status}}"
+        },
+        "stats": {
+            "helped": "मदद की",
+            "rating": "रेटिंग",
+            "approved": "अनुमोदित",
+            "pending": "लंबित",
+            "resolved": "हल किया",
+            "seniors": "वरिष्ठ"
+        },
+        "volunteer": {
+            "skills": "कौशल",
+            "availability": "उपलब्धता",
+            "helpTypes": "पसंदीदा मदद के प्रकार",
+            "whyVolunteer": "मैं क्यों स्वयंसेवा करता हूँ",
+            "noSkills": "कोई कौशल नहीं जोड़ा गया",
+            "weekdays": "सप्ताह के दिन",
+            "weekends": "सप्ताहांत",
+            "evenings": "शाम",
+            "anytime": "कभी भी",
+            "emotional": "भावनात्मक",
+            "daily": "दैनिक",
+            "health": "स्वास्थ्य",
+            "emergency": "आपातकालीन",
+            "changesRequireApproval": "परिवर्तनों के लिए एडमिन की मंजूरी आवश्यक है।"
+        },
+        "admin": {
+            "capabilities": "एडमिन क्षमताएं",
+            "approveReject": "स्वयंसेवकों को स्वीकार/अस्वीकार करें",
+            "manageSOS": "SOS अलर्ट प्रबंधित करें",
+            "viewAnalytics": "एनालिटिक्स और रिपोर्ट देखें",
+            "aiRisk": "AI जोखिम डैशबोर्ड एक्सेस",
+            "accountSettings": "खाता सेटिंग्स",
+            "notifications": "अधिसूचना प्राथमिकताएं",
+            "changePassword": "पासवर्ड बदलें",
+            "activityLog": "गतिविधि लॉग",
+            "notificationOptions": {
+                "sosAlerts": "SOS अलर्ट",
+                "volunteerRequests": "स्वयंसेवक अनुरोध",
+                "systemUpdates": "सिस्टम अपडेट",
+                "dailyReports": "दैनिक रिपोर्ट",
+                "savePreferences": "प्राथमिकताएं सहेजें"
+            },
+            "close": "बंद करें"
+        },
+        "ngo": {
+            "ngoName": "एनजीओ का नाम",
+            "registrationId": "पंजीकरण आईडी",
+            "regions": "क्षेत्र",
+            "verification": "सत्यापन",
+            "verified": "सत्यापित",
+            "notVerified": "सत्यापित नहीं",
+            "updateStatus": "अपडेट स्थिति: {{status}}",
+            "contactPerson": "संपर्क व्यक्ति",
+            "supportEmail": "सहायता ईमेल",
+            "requestUpdate": "अपडेट का अनुरोध करें",
+            "updateHint": "परिवर्तनों के लिए व्यवस्थापक की मंजूरी आवश्यक है।",
+            "submittedTitle": "प्रस्तुत किया गया",
+            "submittedMessage": "आपका प्रोफ़ाइल परिवर्तन अनुरोध व्यवस्थापक अनुमोदन के लिए भेज दिया गया है।"
+        }
+    }
+}

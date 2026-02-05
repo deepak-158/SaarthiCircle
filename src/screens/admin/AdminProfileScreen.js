@@ -19,6 +19,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { colors, typography, spacing, borderRadius, shadows } from '../../theme';
 import { logout } from '../../services/authService';
+import { useTranslation } from 'react-i18next';
 import { BACKEND_URL as API_BASE } from '../../config/backend';
 
 // Default admin profile
@@ -32,16 +33,17 @@ const DEFAULT_ADMIN = {
 };
 
 const AdminProfileScreen = ({ navigation }) => {
+  const { t } = useTranslation();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [profile, setProfile] = useState(DEFAULT_ADMIN);
   const [editedProfile, setEditedProfile] = useState({});
-  
+
   // Settings modals
   const [showNotificationSettings, setShowNotificationSettings] = useState(false);
   const [showActivityLog, setShowActivityLog] = useState(false);
-  
+
   // Notification preferences
   const [notifications, setNotifications] = useState({
     sosAlerts: true,
@@ -49,7 +51,7 @@ const AdminProfileScreen = ({ navigation }) => {
     systemUpdates: true,
     dailyReports: false,
   });
-  
+
   // Activity log (dummy data)
   const [activityLog] = useState([
     { id: '1', action: 'Approved volunteer Rahul Sharma', time: '2 hours ago' },
@@ -75,7 +77,7 @@ const AdminProfileScreen = ({ navigation }) => {
     try {
       setLoading(true);
       const token = await AsyncStorage.getItem('userToken');
-      
+
       // Try fetching fresh profile from backend
       try {
         const resp = await fetch(`${API_BASE}/me`, {
@@ -128,7 +130,7 @@ const AdminProfileScreen = ({ navigation }) => {
 
   const handleSave = async () => {
     if (!editedProfile.fullName?.trim()) {
-      Alert.alert('Required', 'Please enter your full name');
+      Alert.alert(t('common.error'), t('profile.fields.fullName') + ' is required');
       return;
     }
 
@@ -149,11 +151,11 @@ const AdminProfileScreen = ({ navigation }) => {
       });
 
       if (resp.status === 401) {
-        Alert.alert('Session Expired', 'Your session has expired. Please login again.');
+        Alert.alert(t('common.error'), 'Your session has expired. Please login again.');
         await logout();
         return;
       }
-      
+
       const result = await resp.json();
       if (!resp.ok) throw new Error(result?.error || 'Failed to update profile');
 
@@ -162,11 +164,11 @@ const AdminProfileScreen = ({ navigation }) => {
       await AsyncStorage.setItem('userProfile', JSON.stringify(updatedProfile));
       setProfile({ ...updatedProfile, fullName: updatedProfile.name || updatedProfile.full_name });
       setEditMode(false);
-      
-      Alert.alert('Success', 'Profile updated successfully!');
+
+      Alert.alert(t('caregiver.interaction.success'), t('profile.save') + ' successful!');
     } catch (error) {
       console.error('Error saving profile:', error);
-      Alert.alert('Error', error.message || 'Failed to save profile. Please try again.');
+      Alert.alert(t('common.error'), error.message || 'Failed to save profile. Please try again.');
     } finally {
       setSaving(false);
     }
@@ -184,35 +186,35 @@ const AdminProfileScreen = ({ navigation }) => {
     try {
       await AsyncStorage.setItem('adminNotificationSettings', JSON.stringify(notifications));
       setShowNotificationSettings(false);
-      Alert.alert('Success', 'Notification preferences saved!');
+      Alert.alert(t('caregiver.interaction.success'), 'Notification preferences saved!');
     } catch (error) {
-      Alert.alert('Error', 'Failed to save preferences');
+      Alert.alert(t('common.error'), 'Failed to save preferences');
     }
   };
 
   const handleChangePassword = () => {
     Alert.alert(
-      'Change Password',
+      t('profile.admin.changePassword'),
       'Since you login with OTP, password is not required. Your phone number is your identity.',
-      [{ text: 'OK' }]
+      [{ text: t('common.ok') }]
     );
   };
 
   const handleLogout = async () => {
     if (Platform.OS === 'web') {
-      if (window.confirm('Are you sure you want to logout?')) {
+      if (window.confirm(t('profile.logoutConfirmMessage'))) {
         await logout();
       }
       return;
     }
 
     Alert.alert(
-      'Logout',
-      'Are you sure you want to logout?',
+      t('profile.logoutConfirmTitle'),
+      t('profile.logoutConfirmMessage'),
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: t('profile.cancel'), style: 'cancel' },
         {
-          text: 'Logout',
+          text: t('profile.logout'),
           style: 'destructive',
           onPress: async () => {
             await logout();
@@ -226,7 +228,7 @@ const AdminProfileScreen = ({ navigation }) => {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color={colors.primary.main} />
-        <Text style={styles.loadingText}>Loading profile...</Text>
+        <Text style={styles.loadingText}>{t('common.loading')}</Text>
       </View>
     );
   }
@@ -239,13 +241,13 @@ const AdminProfileScreen = ({ navigation }) => {
         style={styles.header}
       >
         <View style={styles.headerContent}>
-          <TouchableOpacity 
+          <TouchableOpacity
             style={styles.backButton}
             onPress={() => navigation.goBack()}
           >
             <MaterialCommunityIcons name="arrow-left" size={28} color={colors.neutral.white} />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Admin Profile</Text>
+          <Text style={styles.headerTitle}>{t('profile.adminProfile')}</Text>
           {!editMode ? (
             <TouchableOpacity style={styles.editButton} onPress={handleEdit}>
               <MaterialCommunityIcons name="pencil" size={24} color={colors.neutral.white} />
@@ -275,33 +277,33 @@ const AdminProfileScreen = ({ navigation }) => {
         <View style={styles.statsRow}>
           <View style={styles.statBox}>
             <Text style={styles.statValue}>{stats.volunteersApproved}</Text>
-            <Text style={styles.statLabel}>Approved</Text>
+            <Text style={styles.statLabel}>{t('profile.stats.approved')}</Text>
           </View>
           <View style={styles.statDivider} />
           <View style={styles.statBox}>
             <Text style={styles.statValue}>{stats.incidentsResolved}</Text>
-            <Text style={styles.statLabel}>Resolved</Text>
+            <Text style={styles.statLabel}>{t('profile.stats.resolved')}</Text>
           </View>
           <View style={styles.statDivider} />
           <View style={styles.statBox}>
             <Text style={styles.statValue}>{stats.seniorsHelped}</Text>
-            <Text style={styles.statLabel}>Seniors</Text>
+            <Text style={styles.statLabel}>{t('profile.stats.seniors')}</Text>
           </View>
         </View>
       </LinearGradient>
 
-      <ScrollView 
+      <ScrollView
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
       >
         {/* Personal Information */}
         <View style={[styles.section, shadows.sm]}>
-          <Text style={styles.sectionTitle}>Personal Information</Text>
+          <Text style={styles.sectionTitle}>{t('profile.personalInfo')}</Text>
 
           <View style={styles.fieldRow}>
             <MaterialCommunityIcons name="account" size={22} color={colors.primary.main} />
             <View style={styles.fieldContent}>
-              <Text style={styles.fieldLabel}>Full Name</Text>
+              <Text style={styles.fieldLabel}>{t('profile.fields.fullName')}</Text>
               {editMode ? (
                 <TextInput
                   style={styles.input}
@@ -318,7 +320,7 @@ const AdminProfileScreen = ({ navigation }) => {
           <View style={styles.fieldRow}>
             <MaterialCommunityIcons name="email" size={22} color={colors.primary.main} />
             <View style={styles.fieldContent}>
-              <Text style={styles.fieldLabel}>Email</Text>
+              <Text style={styles.fieldLabel}>{t('profile.fields.email')}</Text>
               <Text style={styles.fieldValue}>{profile.email || 'Not set'}</Text>
             </View>
           </View>
@@ -326,7 +328,7 @@ const AdminProfileScreen = ({ navigation }) => {
           <View style={styles.fieldRow}>
             <MaterialCommunityIcons name="phone" size={22} color={colors.primary.main} />
             <View style={styles.fieldContent}>
-              <Text style={styles.fieldLabel}>Phone Number</Text>
+              <Text style={styles.fieldLabel}>{t('profile.fields.phone')}</Text>
               {editMode ? (
                 <TextInput
                   style={styles.input}
@@ -344,7 +346,7 @@ const AdminProfileScreen = ({ navigation }) => {
           <View style={styles.fieldRow}>
             <MaterialCommunityIcons name="domain" size={22} color={colors.primary.main} />
             <View style={styles.fieldContent}>
-              <Text style={styles.fieldLabel}>Department</Text>
+              <Text style={styles.fieldLabel}>{t('profile.fields.department')}</Text>
               {editMode ? (
                 <TextInput
                   style={styles.input}
@@ -361,57 +363,57 @@ const AdminProfileScreen = ({ navigation }) => {
 
         {/* Admin Capabilities */}
         <View style={[styles.section, shadows.sm]}>
-          <Text style={styles.sectionTitle}>Admin Capabilities</Text>
-          
+          <Text style={styles.sectionTitle}>{t('profile.admin.capabilities')}</Text>
+
           <View style={styles.capabilityItem}>
             <MaterialCommunityIcons name="account-check" size={24} color={colors.secondary.green} />
-            <Text style={styles.capabilityText}>Approve/Reject Volunteers</Text>
+            <Text style={styles.capabilityText}>{t('profile.admin.approveReject')}</Text>
           </View>
-          
+
           <View style={styles.capabilityItem}>
             <MaterialCommunityIcons name="alert-circle" size={24} color={colors.accent.red} />
-            <Text style={styles.capabilityText}>Manage SOS Alerts</Text>
+            <Text style={styles.capabilityText}>{t('profile.admin.manageSOS')}</Text>
           </View>
-          
+
           <View style={styles.capabilityItem}>
             <MaterialCommunityIcons name="chart-line" size={24} color={colors.primary.main} />
-            <Text style={styles.capabilityText}>View Analytics & Reports</Text>
+            <Text style={styles.capabilityText}>{t('profile.admin.viewAnalytics')}</Text>
           </View>
-          
+
           <View style={styles.capabilityItem}>
             <MaterialCommunityIcons name="brain" size={24} color={colors.accent.orange} />
-            <Text style={styles.capabilityText}>AI Risk Dashboard Access</Text>
+            <Text style={styles.capabilityText}>{t('profile.admin.aiRisk')}</Text>
           </View>
         </View>
 
         {/* Account Settings */}
         <View style={[styles.section, shadows.sm]}>
-          <Text style={styles.sectionTitle}>Account Settings</Text>
-          
-          <TouchableOpacity 
+          <Text style={styles.sectionTitle}>{t('profile.admin.accountSettings')}</Text>
+
+          <TouchableOpacity
             style={styles.settingItem}
             onPress={() => setShowNotificationSettings(true)}
           >
             <MaterialCommunityIcons name="bell" size={24} color={colors.primary.main} />
-            <Text style={styles.settingText}>Notification Preferences</Text>
+            <Text style={styles.settingText}>{t('profile.admin.notifications')}</Text>
             <MaterialCommunityIcons name="chevron-right" size={24} color={colors.neutral.gray} />
           </TouchableOpacity>
-          
-          <TouchableOpacity 
+
+          <TouchableOpacity
             style={styles.settingItem}
             onPress={handleChangePassword}
           >
             <MaterialCommunityIcons name="lock" size={24} color={colors.primary.main} />
-            <Text style={styles.settingText}>Change Password</Text>
+            <Text style={styles.settingText}>{t('profile.admin.changePassword')}</Text>
             <MaterialCommunityIcons name="chevron-right" size={24} color={colors.neutral.gray} />
           </TouchableOpacity>
-          
-          <TouchableOpacity 
+
+          <TouchableOpacity
             style={styles.settingItem}
             onPress={() => setShowActivityLog(true)}
           >
             <MaterialCommunityIcons name="history" size={24} color={colors.primary.main} />
-            <Text style={styles.settingText}>Activity Log</Text>
+            <Text style={styles.settingText}>{t('profile.admin.activityLog')}</Text>
             <MaterialCommunityIcons name="chevron-right" size={24} color={colors.neutral.gray} />
           </TouchableOpacity>
         </View>
@@ -420,17 +422,17 @@ const AdminProfileScreen = ({ navigation }) => {
         {editMode && (
           <View style={styles.editButtons}>
             <TouchableOpacity style={styles.cancelButton} onPress={handleCancel}>
-              <Text style={styles.cancelButtonText}>Cancel</Text>
+              <Text style={styles.cancelButtonText}>{t('profile.cancel')}</Text>
             </TouchableOpacity>
-            <TouchableOpacity 
-              style={styles.saveButton} 
+            <TouchableOpacity
+              style={styles.saveButton}
               onPress={handleSave}
               disabled={saving}
             >
               {saving ? (
                 <ActivityIndicator color={colors.neutral.white} size="small" />
               ) : (
-                <Text style={styles.saveButtonText}>Save Changes</Text>
+                <Text style={styles.saveButtonText}>{t('profile.save')}</Text>
               )}
             </TouchableOpacity>
           </View>
@@ -440,11 +442,11 @@ const AdminProfileScreen = ({ navigation }) => {
         {!editMode && (
           <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
             <MaterialCommunityIcons name="logout" size={24} color={colors.accent.red} />
-            <Text style={styles.logoutText}>Logout</Text>
+            <Text style={styles.logoutText}>{t('profile.logout')}</Text>
           </TouchableOpacity>
         )}
 
-        <Text style={styles.versionText}>SaathiCircle Admin v1.0.0</Text>
+        <Text style={styles.versionText}>{t('profile.version', { version: '1.0.0' })}</Text>
       </ScrollView>
 
       {/* Notification Settings Modal */}
@@ -457,16 +459,16 @@ const AdminProfileScreen = ({ navigation }) => {
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Notification Preferences</Text>
+              <Text style={styles.modalTitle}>{t('profile.admin.notifications')}</Text>
               <TouchableOpacity onPress={() => setShowNotificationSettings(false)}>
                 <MaterialCommunityIcons name="close" size={24} color={colors.neutral.darkGray} />
               </TouchableOpacity>
             </View>
-            
+
             <View style={styles.notificationOption}>
               <View style={styles.notificationInfo}>
                 <MaterialCommunityIcons name="alert-circle" size={24} color={colors.accent.red} />
-                <Text style={styles.notificationLabel}>SOS Alerts</Text>
+                <Text style={styles.notificationLabel}>{t('profile.admin.notificationOptions.sosAlerts')}</Text>
               </View>
               <Switch
                 value={notifications.sosAlerts}
@@ -475,11 +477,11 @@ const AdminProfileScreen = ({ navigation }) => {
                 thumbColor={notifications.sosAlerts ? colors.primary.main : colors.neutral.lightGray}
               />
             </View>
-            
+
             <View style={styles.notificationOption}>
               <View style={styles.notificationInfo}>
                 <MaterialCommunityIcons name="account-plus" size={24} color={colors.primary.main} />
-                <Text style={styles.notificationLabel}>Volunteer Requests</Text>
+                <Text style={styles.notificationLabel}>{t('profile.admin.notificationOptions.volunteerRequests')}</Text>
               </View>
               <Switch
                 value={notifications.volunteerRequests}
@@ -488,11 +490,11 @@ const AdminProfileScreen = ({ navigation }) => {
                 thumbColor={notifications.volunteerRequests ? colors.primary.main : colors.neutral.lightGray}
               />
             </View>
-            
+
             <View style={styles.notificationOption}>
               <View style={styles.notificationInfo}>
                 <MaterialCommunityIcons name="cog" size={24} color={colors.accent.orange} />
-                <Text style={styles.notificationLabel}>System Updates</Text>
+                <Text style={styles.notificationLabel}>{t('profile.admin.notificationOptions.systemUpdates')}</Text>
               </View>
               <Switch
                 value={notifications.systemUpdates}
@@ -501,11 +503,11 @@ const AdminProfileScreen = ({ navigation }) => {
                 thumbColor={notifications.systemUpdates ? colors.primary.main : colors.neutral.lightGray}
               />
             </View>
-            
+
             <View style={styles.notificationOption}>
               <View style={styles.notificationInfo}>
                 <MaterialCommunityIcons name="chart-bar" size={24} color={colors.secondary.green} />
-                <Text style={styles.notificationLabel}>Daily Reports</Text>
+                <Text style={styles.notificationLabel}>{t('profile.admin.notificationOptions.dailyReports')}</Text>
               </View>
               <Switch
                 value={notifications.dailyReports}
@@ -516,7 +518,7 @@ const AdminProfileScreen = ({ navigation }) => {
             </View>
 
             <TouchableOpacity style={styles.modalSaveButton} onPress={handleSaveNotifications}>
-              <Text style={styles.modalSaveButtonText}>Save Preferences</Text>
+              <Text style={styles.modalSaveButtonText}>{t('profile.admin.notificationOptions.savePreferences')}</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -532,12 +534,12 @@ const AdminProfileScreen = ({ navigation }) => {
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Activity Log</Text>
+              <Text style={styles.modalTitle}>{t('profile.admin.activityLog')}</Text>
               <TouchableOpacity onPress={() => setShowActivityLog(false)}>
                 <MaterialCommunityIcons name="close" size={24} color={colors.neutral.darkGray} />
               </TouchableOpacity>
             </View>
-            
+
             <ScrollView style={styles.activityList}>
               {activityLog.map((activity) => (
                 <View key={activity.id} style={styles.activityItem}>
@@ -550,11 +552,11 @@ const AdminProfileScreen = ({ navigation }) => {
               ))}
             </ScrollView>
 
-            <TouchableOpacity 
-              style={styles.modalCloseButton} 
+            <TouchableOpacity
+              style={styles.modalCloseButton}
               onPress={() => setShowActivityLog(false)}
             >
-              <Text style={styles.modalCloseButtonText}>Close</Text>
+              <Text style={styles.modalCloseButtonText}>{t('profile.admin.close')}</Text>
             </TouchableOpacity>
           </View>
         </View>

@@ -16,6 +16,7 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useTranslation } from 'react-i18next';
 import { colors, typography, spacing, borderRadius, shadows } from '../../theme';
 import { logout } from '../../services/authService';
 import { LargeButton } from '../../components/common';
@@ -23,20 +24,21 @@ import { LargeButton } from '../../components/common';
 import { BACKEND_URL as API_BASE } from '../../config/backend';
 
 const availabilityOptions = [
-  { id: 'weekdays', label: 'Weekdays' },
-  { id: 'weekends', label: 'Weekends' },
-  { id: 'evenings', label: 'Evenings' },
-  { id: 'anytime', label: 'Anytime' },
+  { id: 'weekdays' },
+  { id: 'weekends' },
+  { id: 'evenings' },
+  { id: 'anytime' },
 ];
 
 const helpTypes = [
-  { id: 'emotional', icon: 'heart', label: 'Emotional' },
-  { id: 'daily', icon: 'tools', label: 'Daily' },
-  { id: 'health', icon: 'stethoscope', label: 'Health' },
-  { id: 'emergency', icon: 'alert-circle', label: 'Emergency' },
+  { id: 'emotional', icon: 'heart' },
+  { id: 'daily', icon: 'tools' },
+  { id: 'health', icon: 'stethoscope' },
+  { id: 'emergency', icon: 'alert-circle' },
 ];
 
 const VolunteerProfileScreen = ({ navigation }) => {
+  const { t } = useTranslation();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [editMode, setEditMode] = useState(false);
@@ -66,7 +68,7 @@ const VolunteerProfileScreen = ({ navigation }) => {
     try {
       setLoading(true);
       const token = await AsyncStorage.getItem('userToken');
-      
+
       // Try fetching fresh profile from backend
       try {
         const resp = await fetch(`${API_BASE}/me`, {
@@ -120,15 +122,14 @@ const VolunteerProfileScreen = ({ navigation }) => {
   const handleSave = async () => {
     const nameToSave = editedProfile.full_name;
     if (!nameToSave?.trim()) {
-      Alert.alert('Required', 'Please enter your full name');
+      Alert.alert(t('common.error'), t('profile.fields.fullName') + ' is required');
       return;
     }
 
     setSaving(true);
     try {
       const token = await AsyncStorage.getItem('userToken');
-      
-      // Prepare all fields for the server's metadata storage
+
       const updateData = {
         full_name: editedProfile.full_name,
         name: editedProfile.full_name,
@@ -152,33 +153,28 @@ const VolunteerProfileScreen = ({ navigation }) => {
         },
         body: JSON.stringify(updateData),
       });
-      
+
       const result = await resp.json();
       if (!resp.ok) throw new Error(result?.error || 'Failed to update profile');
 
-      // The server returns { profile: data }
       const serverProfile = result.profile;
-      
-      // Update local storage and state
-      // We merge with existing profile to keep frontend-only fields if any
-      // We also preserve edited fields that server might have ignored (like age, city)
-      // by merging editedProfile back in.
-      const updatedProfile = { 
+
+      const updatedProfile = {
         ...profile,
-        ...editedProfile, // Keep what the user just typed (age, city, etc.)
-        ...serverProfile, // Overwrite with server truth for the fields it supports
-        full_name: serverProfile.name || editedProfile.full_name 
+        ...editedProfile,
+        ...serverProfile,
+        full_name: serverProfile.name || editedProfile.full_name
       };
-      
+
       await AsyncStorage.setItem('userProfile', JSON.stringify(updatedProfile));
       setProfile(updatedProfile);
       setEditedProfile(updatedProfile);
       setEditMode(false);
-      
-      Alert.alert('Success', 'Profile updated successfully!');
+
+      Alert.alert(t('caregiver.interaction.success'), t('profile.save') + ' successful!');
     } catch (error) {
       console.error('Error saving profile:', error);
-      Alert.alert('Error', error.message || 'Failed to save profile. Please try again.');
+      Alert.alert(t('common.error'), error.message || 'Failed to save profile. Please try again.');
     } finally {
       setSaving(false);
     }
@@ -198,7 +194,7 @@ const VolunteerProfileScreen = ({ navigation }) => {
 
   const handleLogout = async () => {
     if (Platform.OS === 'web') {
-      const confirmed = window.confirm('Are you sure you want to logout?');
+      const confirmed = window.confirm(t('profile.logoutConfirmMessage'));
       if (confirmed) {
         await logout();
       }
@@ -206,12 +202,12 @@ const VolunteerProfileScreen = ({ navigation }) => {
     }
 
     Alert.alert(
-      'Logout',
-      'Are you sure you want to logout?',
+      t('profile.logoutConfirmTitle'),
+      t('profile.logoutConfirmMessage'),
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: t('profile.cancel'), style: 'cancel' },
         {
-          text: 'Logout',
+          text: t('profile.logout'),
           style: 'destructive',
           onPress: async () => {
             await logout();
@@ -225,7 +221,7 @@ const VolunteerProfileScreen = ({ navigation }) => {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color={colors.primary.main} />
-        <Text style={styles.loadingText}>Loading profile...</Text>
+        <Text style={styles.loadingText}>{t('common.loading')}</Text>
       </View>
     );
   }
@@ -238,13 +234,13 @@ const VolunteerProfileScreen = ({ navigation }) => {
         style={styles.header}
       >
         <View style={styles.headerContent}>
-          <TouchableOpacity 
+          <TouchableOpacity
             style={styles.backButton}
             onPress={() => navigation.goBack()}
           >
             <MaterialCommunityIcons name="arrow-left" size={28} color={colors.neutral.white} />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>My Profile</Text>
+          <Text style={styles.headerTitle}>{t('profile.myProfile')}</Text>
           {!editMode ? (
             <View style={{ flexDirection: 'row' }}>
               <TouchableOpacity style={styles.editButton} onPress={handleEdit}>
@@ -281,45 +277,45 @@ const VolunteerProfileScreen = ({ navigation }) => {
         <View style={styles.statsRow}>
           <View style={styles.statBox}>
             <Text style={styles.statValue}>{profile.help_count || 0}</Text>
-            <Text style={styles.statLabel}>Helped</Text>
+            <Text style={styles.statLabel}>{t('profile.stats.helped')}</Text>
           </View>
           <View style={styles.statDivider} />
           <View style={styles.statBox}>
             <Text style={styles.statValue}>{profile.rating || '0.0'}</Text>
-            <Text style={styles.statLabel}>Rating</Text>
+            <Text style={styles.statLabel}>{t('profile.stats.rating')}</Text>
           </View>
           <View style={styles.statDivider} />
           <View style={styles.statBox}>
-            <MaterialCommunityIcons 
-              name={profile.is_approved ? 'check-circle' : 'clock-outline'} 
-              size={24} 
-              color={profile.is_approved ? '#4CAF50' : '#FF9800'} 
+            <MaterialCommunityIcons
+              name={profile.is_approved ? 'check-circle' : 'clock-outline'}
+              size={24}
+              color={profile.is_approved ? '#4CAF50' : '#FF9800'}
             />
             <Text style={[styles.statLabel, { marginTop: 4 }]}>
-              {profile.is_approved ? 'Approved' : 'Pending'}
+              {profile.is_approved ? t('profile.stats.approved') : t('profile.stats.pending')}
             </Text>
           </View>
         </View>
       </LinearGradient>
 
-      <ScrollView 
+      <ScrollView
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
       >
         {/* Personal Information */}
         <View style={[styles.section, shadows.sm]}>
-          <Text style={styles.sectionTitle}>Personal Information</Text>
+          <Text style={styles.sectionTitle}>{t('profile.personalInfo')}</Text>
 
           <View style={styles.fieldRow}>
             <MaterialCommunityIcons name="account" size={22} color={colors.primary.main} />
             <View style={styles.fieldContent}>
-              <Text style={styles.fieldLabel}>Full Name</Text>
+              <Text style={styles.fieldLabel}>{t('profile.fields.fullName')}</Text>
               {editMode ? (
                 <TextInput
                   style={styles.input}
                   value={editedProfile.full_name}
                   onChangeText={(text) => updateField('full_name', text)}
-                  placeholder="Enter full name"
+                  placeholder={t('profile.fields.fullName')}
                 />
               ) : (
                 <Text style={styles.fieldValue}>{profile.full_name || profile.name || 'Not set'}</Text>
@@ -330,7 +326,7 @@ const VolunteerProfileScreen = ({ navigation }) => {
           <View style={styles.fieldRow}>
             <MaterialCommunityIcons name="phone" size={22} color={colors.primary.main} />
             <View style={styles.fieldContent}>
-              <Text style={styles.fieldLabel}>Phone Number</Text>
+              <Text style={styles.fieldLabel}>{t('profile.fields.phone')}</Text>
               <Text style={styles.fieldValue}>{profile.phone || 'Not set'}</Text>
             </View>
           </View>
@@ -338,17 +334,17 @@ const VolunteerProfileScreen = ({ navigation }) => {
           <View style={styles.fieldRow}>
             <MaterialCommunityIcons name="cake" size={22} color={colors.primary.main} />
             <View style={styles.fieldContent}>
-              <Text style={styles.fieldLabel}>Age</Text>
+              <Text style={styles.fieldLabel}>{t('profile.fields.age')}</Text>
               {editMode ? (
                 <TextInput
                   style={styles.input}
                   value={String(editedProfile.age || '')}
                   onChangeText={(text) => updateField('age', text.replace(/\D/g, ''))}
-                  placeholder="Enter age"
+                  placeholder={t('profile.fields.age')}
                   keyboardType="number-pad"
                 />
               ) : (
-                <Text style={styles.fieldValue}>{profile.age ? `${profile.age} years` : 'Not set'}</Text>
+                <Text style={styles.fieldValue}>{profile.age ? `${profile.age}` : 'Not set'}</Text>
               )}
             </View>
           </View>
@@ -356,13 +352,13 @@ const VolunteerProfileScreen = ({ navigation }) => {
           <View style={styles.fieldRow}>
             <MaterialCommunityIcons name="city" size={22} color={colors.primary.main} />
             <View style={styles.fieldContent}>
-              <Text style={styles.fieldLabel}>City</Text>
+              <Text style={styles.fieldLabel}>{t('profile.fields.city')}</Text>
               {editMode ? (
                 <TextInput
                   style={styles.input}
                   value={editedProfile.city}
                   onChangeText={(text) => updateField('city', text)}
-                  placeholder="Enter city"
+                  placeholder={t('profile.fields.city')}
                 />
               ) : (
                 <Text style={styles.fieldValue}>{profile.city || 'Not set'}</Text>
@@ -373,13 +369,13 @@ const VolunteerProfileScreen = ({ navigation }) => {
           <View style={styles.fieldRow}>
             <MaterialCommunityIcons name="map-marker" size={22} color={colors.primary.main} />
             <View style={styles.fieldContent}>
-              <Text style={styles.fieldLabel}>Address</Text>
+              <Text style={styles.fieldLabel}>{t('profile.fields.address')}</Text>
               {editMode ? (
                 <TextInput
                   style={[styles.input, styles.textArea]}
                   value={editedProfile.address}
                   onChangeText={(text) => updateField('address', text)}
-                  placeholder="Enter address"
+                  placeholder={t('profile.fields.address')}
                   multiline
                 />
               ) : (
@@ -391,7 +387,7 @@ const VolunteerProfileScreen = ({ navigation }) => {
 
         {/* Skills */}
         <View style={[styles.section, shadows.sm]}>
-          <Text style={styles.sectionTitle}>Skills</Text>
+          <Text style={styles.sectionTitle}>{t('profile.volunteer.skills')}</Text>
           <View style={styles.skillsContainer}>
             {(profile.skills || []).length > 0 ? (
               (profile.skills || []).map((skill, index) => (
@@ -400,7 +396,7 @@ const VolunteerProfileScreen = ({ navigation }) => {
                 </View>
               ))
             ) : (
-              <Text style={styles.emptyText}>No skills added</Text>
+              <Text style={styles.emptyText}>{t('profile.volunteer.noSkills')}</Text>
             )}
           </View>
           {editMode && (
@@ -415,7 +411,7 @@ const VolunteerProfileScreen = ({ navigation }) => {
 
         {/* Availability */}
         <View style={[styles.section, shadows.sm]}>
-          <Text style={styles.sectionTitle}>Availability</Text>
+          <Text style={styles.sectionTitle}>{t('profile.volunteer.availability')}</Text>
           {editMode ? (
             <View style={styles.availabilityOptions}>
               {availabilityOptions.map((option) => (
@@ -431,7 +427,7 @@ const VolunteerProfileScreen = ({ navigation }) => {
                     styles.availabilityText,
                     editedProfile.availability === option.id && styles.selectedAvailabilityText,
                   ]}>
-                    {option.label}
+                    {t(`profile.volunteer.${option.id}`)}
                   </Text>
                 </TouchableOpacity>
               ))}
@@ -440,7 +436,7 @@ const VolunteerProfileScreen = ({ navigation }) => {
             <View style={styles.fieldRow}>
               <MaterialCommunityIcons name="calendar-clock" size={22} color={colors.primary.main} />
               <Text style={styles.availabilityValue}>
-                {availabilityOptions.find(o => o.id === profile.availability)?.label || 'Not set'}
+                {t(`profile.volunteer.${profile.availability || 'weekdays'}`)}
               </Text>
             </View>
           )}
@@ -448,13 +444,13 @@ const VolunteerProfileScreen = ({ navigation }) => {
 
         {/* Preferred Help Types */}
         <View style={[styles.section, shadows.sm]}>
-          <Text style={styles.sectionTitle}>Preferred Help Types</Text>
+          <Text style={styles.sectionTitle}>{t('profile.volunteer.helpTypes')}</Text>
           <View style={styles.helpTypesGrid}>
             {helpTypes.map((helpType) => {
-              const isSelected = editMode 
+              const isSelected = editMode
                 ? (editedProfile.preferred_help_types || []).includes(helpType.id)
                 : (profile.preferred_help_types || []).includes(helpType.id);
-              
+
               return (
                 <TouchableOpacity
                   key={helpType.id}
@@ -468,7 +464,7 @@ const VolunteerProfileScreen = ({ navigation }) => {
                     color={isSelected ? colors.neutral.white : colors.primary.main}
                   />
                   <Text style={[styles.helpTypeLabel, isSelected && styles.selectedHelpTypeLabel]}>
-                    {helpType.label}
+                    {t(`profile.volunteer.${helpType.id}`)}
                   </Text>
                 </TouchableOpacity>
               );
@@ -478,7 +474,7 @@ const VolunteerProfileScreen = ({ navigation }) => {
 
         {/* Motivation */}
         <View style={[styles.section, shadows.sm]}>
-          <Text style={styles.sectionTitle}>Why I Volunteer</Text>
+          <Text style={styles.sectionTitle}>{t('profile.volunteer.whyVolunteer')}</Text>
           {editMode ? (
             <TextInput
               style={[styles.input, styles.textArea]}
@@ -499,17 +495,17 @@ const VolunteerProfileScreen = ({ navigation }) => {
         {editMode && (
           <View style={styles.editButtons}>
             <TouchableOpacity style={styles.cancelButton} onPress={handleCancel}>
-              <Text style={styles.cancelButtonText}>Cancel</Text>
+              <Text style={styles.cancelButtonText}>{t('profile.cancel')}</Text>
             </TouchableOpacity>
-            <TouchableOpacity 
-              style={styles.saveButton} 
+            <TouchableOpacity
+              style={styles.saveButton}
               onPress={handleSave}
               disabled={saving}
             >
               {saving ? (
                 <ActivityIndicator color={colors.neutral.white} size="small" />
               ) : (
-                <Text style={styles.saveButtonText}>Save Changes</Text>
+                <Text style={styles.saveButtonText}>{t('profile.save')}</Text>
               )}
             </TouchableOpacity>
           </View>
@@ -519,7 +515,7 @@ const VolunteerProfileScreen = ({ navigation }) => {
         {!editMode && (
           <View style={{ marginTop: spacing.lg }}>
             <LargeButton
-              title="Logout"
+              title={t('profile.logout')}
               onPress={handleLogout}
               variant="outline"
               icon="logout"

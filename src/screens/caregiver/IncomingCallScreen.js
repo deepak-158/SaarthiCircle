@@ -1,5 +1,6 @@
 // Incoming Call Screen for Volunteers/Caregivers
 import React, { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   View,
   Text,
@@ -11,15 +12,13 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { colors, typography, spacing, borderRadius, shadows } from '../../theme';
-import { getTranslation } from '../../i18n/translations';
 import socketService, { getSocket, acceptVoiceCall } from '../../services/socketService';
 import { useChat } from '../../context/ChatContext';
 
 const IncomingCallScreen = ({ navigation, route }) => {
   const { conversationId, callerId, callerName } = route.params || {};
   const { setCallActive } = useChat();
-  const [language] = useState('en');
-  const t = getTranslation(language);
+  const { t } = useTranslation();
   const [currentUserId, setCurrentUserId] = useState(null);
 
   useEffect(() => {

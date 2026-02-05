@@ -1,9 +1,10 @@
 // Admin Home Dashboard Screen
 import React, { useState, useEffect } from 'react';
-import { 
-  View, 
-  Text, 
-  StyleSheet, 
+import { useTranslation } from 'react-i18next';
+import {
+  View,
+  Text,
+  StyleSheet,
   SafeAreaView,
   ScrollView,
   TouchableOpacity,
@@ -41,6 +42,7 @@ const DEFAULT_ACTIVITY = [
 ];
 
 const AdminHomeScreen = ({ navigation }) => {
+  const { t } = useTranslation();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [adminName, setAdminName] = useState('Admin');
@@ -86,7 +88,7 @@ const AdminHomeScreen = ({ navigation }) => {
   const loadDashboardData = async () => {
     try {
       setLoading(true);
-      
+
       // Load admin profile from AsyncStorage
       try {
         const profileJson = await AsyncStorage.getItem('userProfile');
@@ -163,7 +165,7 @@ const AdminHomeScreen = ({ navigation }) => {
     const minutes = Math.floor(diff / (1000 * 60));
     const hours = Math.floor(diff / (1000 * 60 * 60));
     const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-    
+
     if (minutes < 1) return 'Just now';
     if (minutes < 60) return `${minutes} mins ago`;
     if (hours < 24) return `${hours} hours ago`;
@@ -192,11 +194,11 @@ const AdminHomeScreen = ({ navigation }) => {
       {/* Header */}
       <View style={styles.header}>
         <View>
-          <Text style={styles.greeting}>Welcome back,</Text>
+          <Text style={styles.greeting}>{t('admin.welcome')}</Text>
           <Text style={styles.adminName}>{adminName}</Text>
         </View>
         <View style={styles.headerActions}>
-          <TouchableOpacity 
+          <TouchableOpacity
             style={styles.notificationBtn}
             onPress={() => navigation.navigate('Notifications')}
           >
@@ -211,7 +213,7 @@ const AdminHomeScreen = ({ navigation }) => {
               </View>
             )}
           </TouchableOpacity>
-          <TouchableOpacity 
+          <TouchableOpacity
             style={styles.profileBtn}
             onPress={() => navigation.navigate('AdminProfile')}
           >
@@ -224,7 +226,7 @@ const AdminHomeScreen = ({ navigation }) => {
         </View>
       </View>
 
-      <ScrollView 
+      <ScrollView
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         refreshControl={
@@ -244,7 +246,7 @@ const AdminHomeScreen = ({ navigation }) => {
 
         {/* SOS Alert Banner */}
         {stats.sosAlerts > 0 && (
-          <TouchableOpacity 
+          <TouchableOpacity
             style={[styles.sosBanner, shadows.md]}
             onPress={() => navigation.navigate('IncidentManagement')}
           >
@@ -266,7 +268,7 @@ const AdminHomeScreen = ({ navigation }) => {
         )}
 
         {/* KPI Cards */}
-        <Text style={styles.sectionTitle}>Key Metrics</Text>
+        <Text style={styles.sectionTitle}>{t('admin.sections.keyMetrics')}</Text>
         <View style={styles.statsGrid}>
           <View style={[styles.statCard, shadows.sm]}>
             <MaterialCommunityIcons
@@ -275,7 +277,7 @@ const AdminHomeScreen = ({ navigation }) => {
               color={colors.primary.main}
             />
             <Text style={styles.statNumber}>{stats.totalSeniors}</Text>
-            <Text style={styles.statLabel}>Total Seniors</Text>
+            <Text style={styles.statLabel}>{t('admin.stats.totalSeniors')}</Text>
           </View>
 
           <View style={[styles.statCard, shadows.sm]}>
@@ -285,7 +287,7 @@ const AdminHomeScreen = ({ navigation }) => {
               color={colors.secondary.green}
             />
             <Text style={styles.statNumber}>{stats.activeCaregivers}</Text>
-            <Text style={styles.statLabel}>Active Caregivers</Text>
+            <Text style={styles.statLabel}>{t('admin.stats.activeCaregivers')}</Text>
           </View>
 
           <View style={[styles.statCard, shadows.sm]}>
@@ -295,7 +297,7 @@ const AdminHomeScreen = ({ navigation }) => {
               color={colors.accent.orange}
             />
             <Text style={styles.statNumber}>{stats.pendingRequests}</Text>
-            <Text style={styles.statLabel}>Pending Requests</Text>
+            <Text style={styles.statLabel}>{t('admin.stats.pendingRequests')}</Text>
           </View>
 
           <View style={[styles.statCard, shadows.sm]}>
@@ -305,14 +307,14 @@ const AdminHomeScreen = ({ navigation }) => {
               color={colors.secondary.green}
             />
             <Text style={styles.statNumber}>{stats.helpResolved}</Text>
-            <Text style={styles.statLabel}>Help Resolved</Text>
+            <Text style={styles.statLabel}>{t('admin.stats.helpResolved')}</Text>
           </View>
         </View>
 
         {/* Quick Actions */}
-        <Text style={styles.sectionTitle}>Quick Actions</Text>
+        <Text style={styles.sectionTitle}>{t('admin.sections.quickActions')}</Text>
         <View style={styles.actionsGrid}>
-          <TouchableOpacity 
+          <TouchableOpacity
             style={[styles.actionCard, shadows.sm]}
             onPress={() => navigation.navigate('AIRiskDashboard')}
           >
@@ -323,11 +325,11 @@ const AdminHomeScreen = ({ navigation }) => {
                 color={colors.primary.main}
               />
             </View>
-            <Text style={styles.actionTitle}>AI Risk Dashboard</Text>
+            <Text style={styles.actionTitle}>{t('admin.actions.aiRisk')}</Text>
             <Text style={styles.actionSubtitle}>View wellness insights</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity 
+          <TouchableOpacity
             style={[styles.actionCard, shadows.sm]}
             onPress={() => navigation.navigate('IncidentManagement')}
           >
@@ -338,11 +340,11 @@ const AdminHomeScreen = ({ navigation }) => {
                 color={colors.accent.red}
               />
             </View>
-            <Text style={styles.actionTitle}>Incident Management</Text>
+            <Text style={styles.actionTitle}>{t('admin.actions.incidents')}</Text>
             <Text style={styles.actionSubtitle}>Track escalations</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity 
+          <TouchableOpacity
             style={[styles.actionCard, shadows.sm]}
             onPress={() => navigation.navigate('Analytics')}
           >
@@ -353,11 +355,11 @@ const AdminHomeScreen = ({ navigation }) => {
                 color={colors.secondary.green}
               />
             </View>
-            <Text style={styles.actionTitle}>Analytics</Text>
+            <Text style={styles.actionTitle}>{t('admin.actions.analytics')}</Text>
             <Text style={styles.actionSubtitle}>View reports</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity 
+          <TouchableOpacity
             style={[styles.actionCard, shadows.sm]}
             onPress={() => navigation.navigate('UserManagement')}
           >
@@ -368,11 +370,11 @@ const AdminHomeScreen = ({ navigation }) => {
                 color={colors.accent.orange}
               />
             </View>
-            <Text style={styles.actionTitle}>User Management</Text>
+            <Text style={styles.actionTitle}>{t('admin.actions.users')}</Text>
             <Text style={styles.actionSubtitle}>Manage users</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity 
+          <TouchableOpacity
             style={[styles.actionCard, shadows.sm]}
             onPress={() => navigation.navigate('VolunteerApproval')}
           >
@@ -383,11 +385,11 @@ const AdminHomeScreen = ({ navigation }) => {
                 color="#1976D2"
               />
             </View>
-            <Text style={styles.actionTitle}>Volunteer Approval</Text>
+            <Text style={styles.actionTitle}>{t('admin.actions.volunteers')}</Text>
             <Text style={styles.actionSubtitle}>Review applications</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity 
+          <TouchableOpacity
             style={[styles.actionCard, shadows.sm]}
             onPress={() => navigation.navigate('NGOApproval')}
           >
@@ -398,24 +400,24 @@ const AdminHomeScreen = ({ navigation }) => {
                 color="#6A1B9A"
               />
             </View>
-            <Text style={styles.actionTitle}>NGO Approval</Text>
+            <Text style={styles.actionTitle}>{t('admin.actions.ngo')}</Text>
             <Text style={styles.actionSubtitle}>Review NGO applications</Text>
           </TouchableOpacity>
         </View>
 
         {/* Recent Activity */}
         <View style={styles.activityHeader}>
-          <Text style={styles.sectionTitle}>Recent Activity</Text>
+          <Text style={styles.sectionTitle}>{t('admin.sections.recentActivity')}</Text>
           <TouchableOpacity>
-            <Text style={styles.viewAllText}>View All</Text>
+            <Text style={styles.viewAllText}>{t('admin.sections.viewAll')}</Text>
           </TouchableOpacity>
         </View>
-        
+
         <View style={[styles.activityCard, shadows.sm]}>
           {recentActivity.map((activity, index) => {
             const { icon, color } = getActivityIcon(activity.type);
             return (
-              <View 
+              <View
                 key={activity.id}
                 style={[
                   styles.activityItem,
@@ -466,7 +468,7 @@ const AdminHomeScreen = ({ navigation }) => {
           <Text style={[styles.navLabel, styles.navLabelActive]}>Dashboard</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity 
+        <TouchableOpacity
           style={styles.navItem}
           onPress={() => navigation.navigate('AIRiskDashboard')}
         >
@@ -478,7 +480,7 @@ const AdminHomeScreen = ({ navigation }) => {
           <Text style={styles.navLabel}>AI Insights</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity 
+        <TouchableOpacity
           style={styles.navItem}
           onPress={() => navigation.navigate('IncidentManagement')}
         >
@@ -490,7 +492,7 @@ const AdminHomeScreen = ({ navigation }) => {
           <Text style={styles.navLabel}>Incidents</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity 
+        <TouchableOpacity
           style={styles.navItem}
           onPress={() => navigation.navigate('Analytics')}
         >

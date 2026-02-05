@@ -3,6 +3,7 @@ import { StatusBar, LogBox, View, Text, ActivityIndicator, StyleSheet } from 're
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import './src/i18n'; // Initialize i18n
 
 import { AuthNavigator, ElderlyNavigator, CaregiverNavigator, AdminNavigator, NGONavigator, SuperAdminNavigator } from './src/navigation';
 import { SplashScreen } from './src/screens/auth';
@@ -30,7 +31,7 @@ const App = () => {
         const { isAuthenticated: authStatus, userRole: role } = await checkAuth();
         setIsAuthenticated(authStatus);
         setUserRole(role);
-        
+
         const firstTime = await AsyncStorage.getItem('isFirstTime');
         setIsFirstTime(firstTime === null);
       } catch (e) {
@@ -39,7 +40,7 @@ const App = () => {
     }
 
     checkInitialAuth();
-    
+
     const unsubscribeAuth = subscribeToAuthChanges((authStatus, role) => {
       setIsAuthenticated(authStatus);
       setUserRole(role);
@@ -62,17 +63,17 @@ const App = () => {
             const profile = profileJson ? JSON.parse(profileJson) : null;
             const userId = profile?.id || profile?.uid || profile?.userId;
             if (userId) identify({ userId, role: userRole.toUpperCase() });
-          } catch {}
+          } catch { }
         }
-      } catch {}
+      } catch { }
     })();
   }, [isAuthenticated, userRole]);
 
   return (
     <ChatProvider>
       <View style={{ flex: 1 }}>
-        <StatusBar 
-          barStyle="dark-content" 
+        <StatusBar
+          barStyle="dark-content"
           backgroundColor={colors.neutral.white}
         />
         <NavigationContainer>
@@ -84,13 +85,13 @@ const App = () => {
             }}
           >
             <RootStack.Screen name="Splash" component={SplashScreen} />
-            
-            <RootStack.Screen 
-              name="Auth" 
-              component={AuthNavigator} 
+
+            <RootStack.Screen
+              name="Auth"
+              component={AuthNavigator}
               initialParams={{ screen: 'Login' }}
             />
-            
+
             {/* Dashboard routes */}
             <RootStack.Screen name="AdminApp" component={AdminNavigator} />
             <RootStack.Screen name="SuperAdminApp" component={SuperAdminNavigator} />
