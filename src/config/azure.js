@@ -5,7 +5,8 @@
 export const AZURE_SPEECH_CONFIG = {
   subscriptionKey: 'YOUR_AZURE_SPEECH_KEY',
   region: 'YOUR_AZURE_REGION', // e.g., 'eastus', 'westus2'
-  
+  endpoint: '', // Will be constructed from region
+
   // Supported languages for SaathiCircle
   languages: {
     hindi: 'hi-IN',
@@ -19,7 +20,7 @@ export const AZURE_SPEECH_CONFIG = {
     malayalam: 'ml-IN',
     punjabi: 'pa-IN',
   },
-  
+
   // Voice names for text-to-speech
   voices: {
     hindi: {
@@ -31,6 +32,25 @@ export const AZURE_SPEECH_CONFIG = {
       female: 'en-IN-NeerjaNeural',
     },
   },
+};
+
+// Construct endpoint from region
+if (AZURE_SPEECH_CONFIG.region && AZURE_SPEECH_CONFIG.region !== 'YOUR_AZURE_REGION') {
+  AZURE_SPEECH_CONFIG.endpoint = `https://${AZURE_SPEECH_CONFIG.region}.api.cognitive.microsoft.com`;
+}
+
+// Supported languages list
+export const SUPPORTED_LANGUAGES = {
+  'hi-IN': 'Hindi',
+  'en-IN': 'English',
+  'bn-IN': 'Bengali',
+  'ta-IN': 'Tamil',
+  'te-IN': 'Telugu',
+  'mr-IN': 'Marathi',
+  'gu-IN': 'Gujarati',
+  'kn-IN': 'Kannada',
+  'ml-IN': 'Malayalam',
+  'pa-IN': 'Punjabi',
 };
 
 // Azure Language Understanding (LUIS) / Conversational Language Understanding
@@ -79,6 +99,7 @@ export default {
   AZURE_LANGUAGE_CONFIG,
   AZURE_SENTIMENT_CONFIG,
   AZURE_OPENAI_CONFIG,
+  SUPPORTED_LANGUAGES,
   INTENTS,
   SENTIMENT_THRESHOLDS,
 };

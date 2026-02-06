@@ -1153,9 +1153,10 @@ io.on('connection', (socket) => {
     }
     if (role === 'VOLUNTEER') {
       onlineVolunteers.set(userId, socket.id);
+      socket.join('volunteers'); // Join volunteers room for broadcasts
       setVolunteerAvailability({ volunteerId: userId, isOnline: true }).catch(() => { });
       io.emit('volunteer:online', { volunteerId: userId });
-      console.log(`[SOCKET] Volunteer ${userId} now online`);
+      console.log(`[SOCKET] Volunteer ${userId} now online and joined volunteers room`);
 
       // Send any pending seeker requests to this newly online volunteer
       pendingRequests.forEach((req, seniorId) => {
@@ -1168,6 +1169,72 @@ io.on('connection', (socket) => {
       claimFirstPendingChatForVolunteer({ volunteerId: userId }).catch((e) => {
         console.error(`[REQUEST] Auto-match failed for volunteer ${userId}:`, e);
       });
+    }
+  });
+
+  // Volunteer accepts a help request
+  socket.on('help:accept', async ({ requestId, volunteerId }) => {
+    try {
+      if (!requestId || !volunteerId) {
+        return socket.emit('error', { message: 'requestId and volunteerId required' });
+      }
+
+      console.log(`[HELP-REQUEST] Volunteer ${volunteerId} accepting request ${requestId}`);
+
+      // Update help request status in database
+      const { data: request, error } = await supabase
+        .from(TABLES.HELP_REQUESTS)
+        .update({
+          volunteer_id: volunteerId,
+          status: 'accepted',
+          accepted_at: new Date().toISOString()
+        })
+        .eq('id', requestId)
+        .eq('status', 'pending') // Only accept if still pending
+        .select()
+        .single();
+
+      if (error) {
+        console.error(`[HELP-REQUEST] Error accepting request:`, error);
+        return socket.emit('help:accept_failed', { requestId, error: error.message });
+      }
+
+      if (!request) {
+        return socket.emit('help:accept_failed', { requestId, error: 'Request already accepted or not found' });
+      }
+
+      console.log(`[HELP-REQUEST] Request ${requestId} accepted by volunteer ${volunteerId}`);
+
+      // Notify the senior that their request was accepted
+      const seniorSocketId = userSockets.get(request.senior_id);
+      if (seniorSocketId) {
+        io.to(seniorSocketId).emit('help:accepted', {
+          request,
+          volunteer: { id: volunteerId }
+        });
+      }
+
+      // Notify the volunteer of successful acceptance
+      socket.emit('help:accept_success', { request });
+
+      // Notify other volunteers that this request is no longer available
+      onlineVolunteers.forEach((volSocketId, volId) => {
+        if (volId !== volunteerId) {
+          io.to(volSocketId).emit('help:request_claimed', { requestId, volunteerId });
+        }
+      });
+
+      // Send push notification to senior
+      sendPushNotification(
+        request.senior_id,
+        '✅ Help is on the way!',
+        'A volunteer has accepted your request',
+        { requestId, volunteerId }
+      );
+
+    } catch (e) {
+      console.error(`[HELP-REQUEST] Error in help:accept:`, e);
+      socket.emit('error', { message: e.message });
     }
   });
 
@@ -4117,23 +4184,112 @@ app.put('/volunteers/me/availability', ensureAuth, async (req, res) => {
 // Help Request Endpoints
 app.post('/help-requests', ensureAuth, async (req, res) => {
   try {
-    const { category, description, priority } = req.body || {};
-    const { data, error } = await supabase
-      .from(TABLES.HELP_REQUESTS)
-      .insert({
-        senior_id: req.user.id,
-        category: category || 'General',
-        description: description || '',
-        priority: priority || 'medium',
-        status: 'pending',
-        created_at: new Date().toISOString()
-      })
-      .select()
+    const { category, description, priority, language, hasAudio, audioUri } = req.body || {};
+
+    // Fetch senior profile for notification
+    const { data: seniorProfile } = await supabase
+      .from(TABLES.USERS)
+      .select('*')
+      .eq('id', req.user.id)
       .single();
 
-    if (error) throw error;
-    emitAdminUpdate({ type: 'help_request', action: 'created', request: data });
-    res.status(201).json({ request: data });
+    const senior = seniorProfile ? parseProfileData(seniorProfile) : null;
+
+    let requestData;
+
+    // Create help request in database - WITH RETRY LOGIC
+    try {
+      // 1. Try inserting with all fields (voice support)
+      const { data, error } = await supabase
+        .from(TABLES.HELP_REQUESTS)
+        .insert({
+          senior_id: req.user.id,
+          category: category || 'General',
+          description: description || '',
+          priority: priority || 'medium',
+          status: 'pending',
+          language: language || 'en',
+          has_audio: hasAudio || false,
+          audio_uri: audioUri || null,
+          created_at: new Date().toISOString()
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+      requestData = data;
+    } catch (dbError) {
+      console.warn(`[HELP-REQUEST] Full insert failed, retrying with basic fields: ${dbError.message}`);
+
+      // 2. Fallback: Insert without new columns
+      const { data, error } = await supabase
+        .from(TABLES.HELP_REQUESTS)
+        .insert({
+          senior_id: req.user.id,
+          category: category || 'General',
+          description: description || '',
+          priority: priority || 'medium',
+          status: 'pending',
+          created_at: new Date().toISOString()
+        })
+        .select()
+        .single();
+
+      if (error) throw error; // If this fails, real error
+
+      requestData = data;
+      // Attach fields manually for socket notification (even if not in DB)
+      requestData.has_audio = hasAudio;
+      requestData.audio_uri = audioUri;
+      requestData.language = language;
+    }
+
+    console.log(`[HELP-REQUEST] New request created ID: ${requestData.id}`);
+
+    // Prepare notification payload
+    const notificationPayload = {
+      request: requestData,
+      senior: {
+        id: req.user.id,
+        name: senior?.name || senior?.full_name || 'Senior',
+        phone: senior?.phone,
+        region: senior?.region || senior?.city || senior?.area,
+        location: senior?.location
+      },
+      timestamp: requestData.created_at
+    };
+
+    // Emit to admins
+    emitAdminUpdate({
+      type: 'help_request',
+      action: 'created',
+      ...notificationPayload
+    });
+
+    // Emit to ALL online volunteers in real-time
+    console.log(`[HELP-REQUEST] Notifying ${onlineVolunteers.size} online volunteers`);
+
+    onlineVolunteers.forEach((socketId, volunteerId) => {
+      // console.log(`[HELP-REQUEST] Emitting to volunteer ${volunteerId}`);
+      io.to(socketId).emit('help:new_request', notificationPayload);
+    });
+
+    // Also emit to volunteers room (for any volunteers listening to room)
+    io.to('volunteers').emit('help:new_request', notificationPayload);
+
+    // Send push notifications to volunteers
+    onlineVolunteers.forEach((socketId, volunteerId) => {
+      sendPushNotification(
+        volunteerId,
+        '🆘 New Help Request',
+        `${senior?.name || 'A senior'} needs help: ${description?.substring(0, 50) || category}`,
+        { requestId: requestData.id, seniorId: req.user.id, category }
+      );
+    });
+
+    console.log(`[HELP-REQUEST] Request ${requestData.id} broadcast complete`);
+
+    res.status(201).json({ request: requestData });
   } catch (e) {
     console.error(`[ERROR] Failed to create help request:`, e);
     res.status(500).json({ error: e.message });

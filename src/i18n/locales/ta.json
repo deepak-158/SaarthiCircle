@@ -279,7 +279,29 @@
         "statusResponding": "Someone is responding",
         "statusMessage": "Help is on the way. You are not alone.",
         "callHelper": "Call Helper",
-        "reassuringMessage": "Don't worry, we are here to help you. Take your time."
+        "reassuringMessage": "Don't worry, we are here to help you. Take your time.",
+        "voice": {
+            "tapToRecord": "Tap to Record",
+            "releaseToStop": "Release to Stop",
+            "processing": "Processing...",
+            "convertingVoice": "Converting voice to text...",
+            "whatWeHeard": "📝 What we heard:",
+            "recordAgain": "Record Again",
+            "sendRequest": "Send Help Request",
+            "sending": "Sending...",
+            "tips": "Speak slowly and clearly. You can speak in any language.",
+            "errors": {
+                "setupAudio": "Failed to setup audio. Please check microphone permissions.",
+                "micPermission": "Microphone permission required to record voice.",
+                "startRecording": "Failed to start recording. Try again.",
+                "noRecording": "No recording found.",
+                "processVoice": "Error processing voice. Please try again.",
+                "understand": "Failed to understand speech. Please try again.",
+                "playPreview": "Failed to play preview.",
+                "loginRequired": "You must be logged in to request help.",
+                "sendFailed": "Failed to send help request. Please try again."
+            }
+        }
     },
     "sos": {
         "title": "Emergency",
