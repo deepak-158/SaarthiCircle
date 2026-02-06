@@ -1,9 +1,10 @@
 // Companion Matching Screen
 import React, { useState, useEffect } from 'react';
-import { 
-  View, 
-  Text, 
-  StyleSheet, 
+import { useTranslation } from 'react-i18next';
+import {
+  View,
+  Text,
+  StyleSheet,
   SafeAreaView,
   ActivityIndicator,
   Animated,
@@ -19,7 +20,6 @@ import * as Clipboard from 'expo-clipboard';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LargeButton, LargeCard, ActiveChatOverlay } from '../../components/common';
 import { colors, typography, spacing, borderRadius, shadows } from '../../theme';
-import { getTranslation } from '../../i18n/translations';
 // Firebase imports removed
 import socketService, { getSocket, identify, requestCompanion } from '../../services/socketService';
 import { BACKEND_URL as API_BASE } from '../../config/backend';
@@ -75,8 +75,7 @@ const EMERGENCY_CONTACTS = {
 };
 
 const CompanionMatchingScreen = ({ navigation }) => {
-  const [language] = useState('en');
-  const t = getTranslation(language);
+  const { t } = useTranslation();
   const { startSession, setCallStatus, activeChats } = useChat();
   const [searching, setSearching] = useState(true);
   const [companion, setCompanion] = useState(null);
@@ -193,7 +192,7 @@ const CompanionMatchingScreen = ({ navigation }) => {
       });
 
       if (!response.ok) throw new Error('Failed to fetch real volunteers');
-      
+
       const data = await response.json();
       const realCompanions = (data.volunteers || []).map(v => ({
         id: v.id,
@@ -232,7 +231,7 @@ const CompanionMatchingScreen = ({ navigation }) => {
   const findAnotherCompanion = () => {
     setSearching(true);
     setCompanion(null);
-    
+
     setTimeout(() => {
       if (allCompanions.length > 0) {
         // Filter out current companion and pick another
@@ -297,7 +296,7 @@ const CompanionMatchingScreen = ({ navigation }) => {
 
   const handleTextChat = () => {
     const seniorId = userProfile?.id || userProfile?.uid || userProfile?.userId;
-    
+
     if (!seniorId) {
       Alert.alert('Error', 'User not authenticated');
       return;
@@ -306,9 +305,9 @@ const CompanionMatchingScreen = ({ navigation }) => {
     // Instead of directly creating a conversation, emit a request to the backend
     // This will trigger caregiver/volunteer notifications
     setSearching(true);
-    
+
     const socket = getSocket();
-    
+
     // Listen for session:started - when volunteer accepts the request
     socket.off('session:started');
     socket.on('session:started', ({ conversationId: cid, seniorId, volunteerId }) => {
@@ -331,10 +330,10 @@ const CompanionMatchingScreen = ({ navigation }) => {
 
     // Emit the chat request
     console.log('[DEBUG] Emitting seeker:request for text chat from senior:', seniorId);
-    requestCompanion({ 
-      seniorId: seniorId, 
+    requestCompanion({
+      seniorId: seniorId,
       requestType: 'chat',
-      note: 'Senior requesting text chat' 
+      note: 'Senior requesting text chat'
     });
   };
 
@@ -373,7 +372,7 @@ const CompanionMatchingScreen = ({ navigation }) => {
               } catch (e2) {
                 try {
                   await Clipboard.setStringAsync(number);
-                } catch {}
+                } catch { }
                 const reason = e2?.message || e1?.message || 'Dialer not available on this device/simulator.';
                 Alert.alert(
                   'Unable to place call',
@@ -395,7 +394,7 @@ const CompanionMatchingScreen = ({ navigation }) => {
       >
         <SafeAreaView style={styles.safeArea}>
           {/* Emergency SOS Button - Always visible */}
-          <TouchableOpacity 
+          <TouchableOpacity
             style={styles.sosButtonFloating}
             onPress={handleEmergencySOS}
           >
@@ -416,13 +415,13 @@ const CompanionMatchingScreen = ({ navigation }) => {
                 color={colors.primary.main}
               />
             </Animated.View>
-            <Text style={styles.searchingTitle}>{t.companion.title}</Text>
+            <Text style={styles.searchingTitle}>{t('companion.title')}</Text>
             <Text style={styles.searchingSubtitle}>
-              Please wait a moment...
+              {t('companion.searchingMessage')}
             </Text>
-            <ActivityIndicator 
-              size="large" 
-              color={colors.primary.main} 
+            <ActivityIndicator
+              size="large"
+              color={colors.primary.main}
               style={styles.loader}
             />
           </View>
@@ -439,9 +438,9 @@ const CompanionMatchingScreen = ({ navigation }) => {
       <SafeAreaView style={styles.safeArea}>
         {/* Active Chat Overlay */}
         <ActiveChatOverlay navigation={navigation} activeChats={activeChats} />
-        
+
         {/* Emergency SOS Button - Always visible */}
-        <TouchableOpacity 
+        <TouchableOpacity
           style={styles.sosButtonFloating}
           onPress={handleEmergencySOS}
         >
@@ -449,7 +448,7 @@ const CompanionMatchingScreen = ({ navigation }) => {
           <Text style={styles.sosButtonText}>SOS</Text>
         </TouchableOpacity>
 
-        <ScrollView 
+        <ScrollView
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
         >
@@ -464,7 +463,7 @@ const CompanionMatchingScreen = ({ navigation }) => {
 
           {/* Found Message */}
           <Text style={styles.foundTitle}>🎉</Text>
-          <Text style={styles.foundMessage}>{t.companion.foundMessage}</Text>
+          <Text style={styles.foundMessage}>{t('companion.foundMessage')}</Text>
 
           {/* Companion Name & Rating */}
           {companion && (
@@ -481,7 +480,7 @@ const CompanionMatchingScreen = ({ navigation }) => {
               {companion.isReal && (
                 <View style={styles.verifiedBadge}>
                   <MaterialCommunityIcons name="check-decagram" size={16} color="#4CAF50" />
-                  <Text style={styles.verifiedText}>Verified</Text>
+                  <Text style={styles.verifiedText}>{t('companion.verified')}</Text>
                 </View>
               )}
             </View>
@@ -496,7 +495,7 @@ const CompanionMatchingScreen = ({ navigation }) => {
                 color={colors.primary.main}
               />
               <View style={styles.infoTextContainer}>
-                <Text style={styles.infoLabel}>{t.companion.language}</Text>
+                <Text style={styles.infoLabel}>{t('companion.language')}</Text>
                 <Text style={styles.infoValue}>
                   {companion?.language || 'Hindi, English'}
                 </Text>
@@ -510,10 +509,10 @@ const CompanionMatchingScreen = ({ navigation }) => {
                 color={colors.accent.orange}
               />
               <View style={styles.infoTextContainer}>
-                <Text style={styles.infoLabel}>{t.companion.interest}</Text>
+                <Text style={styles.infoLabel}>{t('companion.interest')}</Text>
                 <Text style={styles.infoValue}>
-                  {Array.isArray(companion?.interests) 
-                    ? companion.interests.join(', ') 
+                  {Array.isArray(companion?.interests)
+                    ? companion.interests.join(', ')
                     : companion?.interest || 'General Support'}
                 </Text>
               </View>
@@ -526,7 +525,7 @@ const CompanionMatchingScreen = ({ navigation }) => {
                 color={colors.secondary.green}
               />
               <View style={styles.infoTextContainer}>
-                <Text style={styles.infoLabel}>Availability</Text>
+                <Text style={styles.infoLabel}>{t('companion.availability')}</Text>
                 <Text style={[styles.infoValue, styles.availableText]}>
                   {companion?.availableTime || 'Available Now'}
                 </Text>
@@ -541,7 +540,7 @@ const CompanionMatchingScreen = ({ navigation }) => {
                   color={colors.primary.main}
                 />
                 <View style={styles.infoTextContainer}>
-                  <Text style={styles.infoLabel}>Location</Text>
+                  <Text style={styles.infoLabel}>{t('companion.location')}</Text>
                   <Text style={styles.infoValue}>{companion.city}</Text>
                 </View>
               </View>
@@ -555,8 +554,8 @@ const CompanionMatchingScreen = ({ navigation }) => {
                   color="#9C27B0"
                 />
                 <View style={styles.infoTextContainer}>
-                  <Text style={styles.infoLabel}>People Helped</Text>
-                  <Text style={styles.infoValue}>{companion.helpCount}+ seniors</Text>
+                  <Text style={styles.infoLabel}>{t('companion.peopleHelped')}</Text>
+                  <Text style={styles.infoValue}>{t('companion.seniorsHelped', { count: companion.helpCount })}</Text>
                 </View>
               </View>
             )}
@@ -565,7 +564,7 @@ const CompanionMatchingScreen = ({ navigation }) => {
           {/* Action Buttons */}
           <View style={styles.actionButtons}>
             <LargeButton
-              title={t.companion.voiceCall}
+              title={t('companion.voiceCall')}
               onPress={handleVoiceCall}
               icon="phone"
               variant="primary"
@@ -574,7 +573,7 @@ const CompanionMatchingScreen = ({ navigation }) => {
             />
 
             <LargeButton
-              title={t.companion.textChat}
+              title={t('companion.textChat')}
               onPress={handleTextChat}
               icon="message-text"
               variant="outline"
@@ -585,7 +584,7 @@ const CompanionMatchingScreen = ({ navigation }) => {
 
           {/* Find Another Button */}
           <LargeButton
-            title="Find Another Companion"
+            title={t('companion.findAnother')}
             onPress={findAnotherCompanion}
             variant="outline"
             size="md"
@@ -594,53 +593,53 @@ const CompanionMatchingScreen = ({ navigation }) => {
 
           {/* Safety & Emergency Section */}
           <View style={styles.emergencySection}>
-            <Text style={styles.emergencySectionTitle}>🚨 Safety & Emergency</Text>
-            
+            <Text style={styles.emergencySectionTitle}>{t('companion.emergency.title')}</Text>
+
             <View style={styles.emergencyButtons}>
-              <TouchableOpacity 
+              <TouchableOpacity
                 style={[styles.emergencyBtn, styles.emergencyBtnRed]}
                 onPress={handleEmergencySOS}
               >
                 <MaterialCommunityIcons name="alarm-light" size={28} color={colors.neutral.white} />
-                <Text style={styles.emergencyBtnText}>SOS Alert</Text>
+                <Text style={styles.emergencyBtnText}>{t('companion.emergency.sosAlert')}</Text>
               </TouchableOpacity>
 
-              <TouchableOpacity 
+              <TouchableOpacity
                 style={[styles.emergencyBtn, styles.emergencyBtnOrange]}
                 onPress={() => handleQuickEmergencyCall('ambulance')}
               >
                 <MaterialCommunityIcons name="ambulance" size={28} color={colors.neutral.white} />
-                <Text style={styles.emergencyBtnText}>Ambulance</Text>
+                <Text style={styles.emergencyBtnText}>{t('companion.emergency.ambulance')}</Text>
               </TouchableOpacity>
 
-              <TouchableOpacity 
+              <TouchableOpacity
                 style={[styles.emergencyBtn, styles.emergencyBtnBlue]}
                 onPress={() => handleQuickEmergencyCall('police')}
               >
                 <MaterialCommunityIcons name="shield-account" size={28} color={colors.neutral.white} />
-                <Text style={styles.emergencyBtnText}>Police</Text>
+                <Text style={styles.emergencyBtnText}>{t('companion.emergency.police')}</Text>
               </TouchableOpacity>
             </View>
 
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.emergencyHelpline}
               onPress={() => handleQuickEmergencyCall('emergency')}
             >
               <MaterialCommunityIcons name="phone-alert" size={24} color={colors.accent.red} />
               <View style={styles.helplineText}>
-                <Text style={styles.helplineTitle}>National Emergency</Text>
+                <Text style={styles.helplineTitle}>{t('companion.emergency.nationalEmergency')}</Text>
                 <Text style={styles.helplineNumber}>112</Text>
               </View>
               <MaterialCommunityIcons name="chevron-right" size={24} color={colors.neutral.gray} />
             </TouchableOpacity>
 
-            <TouchableOpacity 
+            <TouchableOpacity
               style={styles.emergencyHelpline}
               onPress={() => handleQuickEmergencyCall('senior_citizen')}
             >
               <MaterialCommunityIcons name="account-heart" size={24} color={colors.primary.main} />
               <View style={styles.helplineText}>
-                <Text style={styles.helplineTitle}>Senior Citizen Helpline</Text>
+                <Text style={styles.helplineTitle}>{t('companion.emergency.seniorHelpline')}</Text>
                 <Text style={styles.helplineNumber}>14567</Text>
               </View>
               <MaterialCommunityIcons name="chevron-right" size={24} color={colors.neutral.gray} />

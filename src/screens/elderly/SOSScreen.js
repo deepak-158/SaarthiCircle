@@ -237,14 +237,13 @@ const SOSScreen = ({ navigation }) => {
               />
             </View>
 
-            <Text style={styles.sentTitle}>SOS Alert Sent!</Text>
+            <Text style={styles.sentTitle}>{t('sos.alertSent')}</Text>
             <Text style={styles.sentSubtitle}>
-              Emergency contacts have been notified.
-              Help is on the way.
+              {t('sos.alertSentDesc')}
             </Text>
 
             <View style={styles.contactsCard}>
-              <Text style={styles.contactsTitle}>Quick Call:</Text>
+              <Text style={styles.contactsTitle}>{t('sos.quickCall')}</Text>
 
               {/* Emergency Services */}
               <TouchableOpacity
@@ -252,7 +251,7 @@ const SOSScreen = ({ navigation }) => {
                 onPress={() => Linking.openURL('tel:112')}
               >
                 <MaterialCommunityIcons name="phone-alert" size={24} color={colors.neutral.white} />
-                <Text style={styles.contactText}>Emergency - 112</Text>
+                <Text style={styles.contactText}>{t('sos.emergency')} - 112</Text>
                 <MaterialCommunityIcons name="phone" size={20} color={colors.accent.yellow} />
               </TouchableOpacity>
 
@@ -261,7 +260,7 @@ const SOSScreen = ({ navigation }) => {
                 onPress={() => Linking.openURL('tel:108')}
               >
                 <MaterialCommunityIcons name="ambulance" size={24} color={colors.neutral.white} />
-                <Text style={styles.contactText}>Ambulance - 108</Text>
+                <Text style={styles.contactText}>{t('sos.ambulance')} - 108</Text>
                 <MaterialCommunityIcons name="phone" size={20} color={colors.accent.yellow} />
               </TouchableOpacity>
 
@@ -270,7 +269,7 @@ const SOSScreen = ({ navigation }) => {
                 onPress={() => Linking.openURL('tel:100')}
               >
                 <MaterialCommunityIcons name="police-badge" size={24} color={colors.neutral.white} />
-                <Text style={styles.contactText}>Police - 100</Text>
+                <Text style={styles.contactText}>{t('sos.police')} - 100</Text>
                 <MaterialCommunityIcons name="phone" size={20} color={colors.accent.yellow} />
               </TouchableOpacity>
 
@@ -289,11 +288,11 @@ const SOSScreen = ({ navigation }) => {
             </View>
 
             <Text style={styles.stayCalm}>
-              🙏 Stay calm. Someone will call you shortly.
+              {t('sos.stayCalm')}
             </Text>
 
             <LargeButton
-              title="Return to Home"
+              title={t('sos.returnHome')}
               onPress={() => navigation.reset({ index: 0, routes: [{ name: 'ElderlyApp' }] })}
               variant="outline"
               size="lg"
@@ -361,8 +360,8 @@ const SOSScreen = ({ navigation }) => {
           {/* Status Text */}
           <Text style={styles.statusText}>
             {isActivated
-              ? `Sending in ${countdown} seconds...`
-              : 'Press and hold for emergency'
+              ? t('sos.sendingStatus', { count: countdown })
+              : t('sos.pressHold')
             }
           </Text>
 
@@ -401,27 +400,27 @@ const SOSScreen = ({ navigation }) => {
 
         {/* Emergency Numbers */}
         <View style={styles.emergencyNumbers}>
-          <Text style={styles.emergencyTitle}>Emergency Numbers:</Text>
+          <Text style={styles.emergencyTitle}>{t('sos.emergencyNumbers')}</Text>
           <View style={styles.numberRow}>
             <TouchableOpacity
               style={styles.numberItem}
               onPress={() => Linking.openURL('tel:100')}
             >
-              <Text style={styles.numberLabel}>Police</Text>
+              <Text style={styles.numberLabel}>{t('sos.police')}</Text>
               <Text style={styles.number}>100</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.numberItem}
               onPress={() => Linking.openURL('tel:108')}
             >
-              <Text style={styles.numberLabel}>Ambulance</Text>
+              <Text style={styles.numberLabel}>{t('sos.ambulance')}</Text>
               <Text style={styles.number}>108</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.numberItem}
               onPress={() => Linking.openURL('tel:112')}
             >
-              <Text style={styles.numberLabel}>Emergency</Text>
+              <Text style={styles.numberLabel}>{t('sos.emergency')}</Text>
               <Text style={styles.number}>112</Text>
             </TouchableOpacity>
           </View>

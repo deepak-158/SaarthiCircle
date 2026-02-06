@@ -1,9 +1,10 @@
 // Help Categories Screen - "I Need Help" flow
-import React, { useState } from 'react';
-import { 
-  View, 
-  Text, 
-  StyleSheet, 
+import React from 'react';
+import { useTranslation } from 'react-i18next';
+import {
+  View,
+  Text,
+  StyleSheet,
   SafeAreaView,
   ScrollView,
   TouchableOpacity,
@@ -12,17 +13,14 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { LargeCard } from '../../components/common';
 import { colors, typography, spacing, borderRadius, shadows } from '../../theme';
-import { getTranslation } from '../../i18n/translations';
 
 const helpCategories = [
   {
     id: 'emotional',
     icon: 'heart',
     emoji: '🧡',
-    title: 'Emotional Support',
-    titleHi: 'भावनात्मक सहारा',
-    subtitle: 'I want someone to talk to',
-    subtitleHi: 'मैं किसी से बात करना चाहता/चाहती हूं',
+    titleKey: 'help.emotional',
+    subtitleKey: 'help.emotionalDesc',
     color: colors.accent.orange,
     bgColor: '#FFF3E0',
   },
@@ -30,10 +28,8 @@ const helpCategories = [
     id: 'daily',
     icon: 'tools',
     emoji: '🛠',
-    title: 'Daily Assistance',
-    titleHi: 'दैनिक सहायता',
-    subtitle: 'Medicine, groceries, small help',
-    subtitleHi: 'दवाई, किराना, छोटी मदद',
+    titleKey: 'help.daily',
+    subtitleKey: 'help.dailyDesc',
     color: colors.primary.main,
     bgColor: colors.primary.light,
   },
@@ -41,10 +37,8 @@ const helpCategories = [
     id: 'health',
     icon: 'stethoscope',
     emoji: '🩺',
-    title: 'Health-Related Help',
-    titleHi: 'स्वास्थ्य संबंधी मदद',
-    subtitle: 'Feeling unwell, need guidance',
-    subtitleHi: 'तबीयत ठीक नहीं, मार्गदर्शन चाहिए',
+    titleKey: 'help.health',
+    subtitleKey: 'help.healthDesc',
     color: colors.secondary.green,
     bgColor: colors.secondary.greenLight,
   },
@@ -52,18 +46,15 @@ const helpCategories = [
     id: 'emergency',
     icon: 'alert-circle',
     emoji: '🚨',
-    title: 'Safety / Emergency',
-    titleHi: 'सुरक्षा / आपातकाल',
-    subtitle: 'Danger, fall, abuse',
-    subtitleHi: 'खतरा, गिरना, दुर्व्यवहार',
+    titleKey: 'help.safety',
+    subtitleKey: 'help.safetyDesc',
     color: colors.accent.red,
     bgColor: '#FFEBEE',
   },
 ];
 
 const HelpCategoriesScreen = ({ navigation }) => {
-  const [language] = useState('en');
-  const t = getTranslation(language);
+  const { t } = useTranslation();
 
   const handleCategorySelect = (category) => {
     if (category.id === 'emergency') {
@@ -79,13 +70,13 @@ const HelpCategoriesScreen = ({ navigation }) => {
       style={styles.container}
     >
       <SafeAreaView style={styles.safeArea}>
-        <ScrollView 
+        <ScrollView
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
         >
           {/* Header */}
           <View style={styles.header}>
-            <TouchableOpacity 
+            <TouchableOpacity
               onPress={() => navigation.goBack()}
               style={styles.backButton}
             >
@@ -95,7 +86,7 @@ const HelpCategoriesScreen = ({ navigation }) => {
                 color={colors.neutral.black}
               />
             </TouchableOpacity>
-            <Text style={styles.title}>{t.help.title}</Text>
+            <Text style={styles.title}>{t('help.title')}</Text>
           </View>
 
           {/* Help Categories */}
@@ -116,10 +107,10 @@ const HelpCategoriesScreen = ({ navigation }) => {
                 </View>
                 <View style={styles.categoryText}>
                   <Text style={[styles.categoryTitle, { color: category.color }]}>
-                    {language === 'hi' ? category.titleHi : category.title}
+                    {t(category.titleKey)}
                   </Text>
                   <Text style={styles.categorySubtitle}>
-                    {language === 'hi' ? category.subtitleHi : category.subtitle}
+                    {t(category.subtitleKey)}
                   </Text>
                 </View>
                 <MaterialCommunityIcons
@@ -139,7 +130,7 @@ const HelpCategoriesScreen = ({ navigation }) => {
               color={colors.secondary.green}
             />
             <Text style={styles.reassuringText}>
-              Don't worry, we are here to help you. Take your time.
+              {t('help.reassuringMessage')}
             </Text>
           </View>
         </ScrollView>

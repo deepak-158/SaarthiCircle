@@ -135,6 +135,34 @@
             "users": "వినియోగదారు నిర్వహణ",
             "volunteers": "వాలంటీర్ ఆమోదం",
             "ngo": "NGO ఆమోదం"
+        },
+        "sos": {
+            "activeSOS": "{{count}} యాక్టివ్ SOS అలర్ట్‌లు",
+            "manageSOSDesc": "చూడటానికి మరియు నిర్వహించడానికి ట్యాప్ చేయండి"
+        },
+        "actionSubtitles": {
+            "viewWellness": "ఆరోగ్య అంతర్దృష్టులను చూడండి",
+            "trackEscalations": "ఎస్కలేషన్లను ట్రాక్ చేయండి",
+            "viewReports": "నివేదికలను చూడండి",
+            "manageUsers": "వినియోగదారులను నిర్వహించండి",
+            "reviewApps": "దరఖాస్తులను సమీక్షించండి",
+            "reviewNGOs": "NGO దరఖాస్తులను సమీక్షించండి"
+        },
+        "responseTime": {
+            "label": "సగటు ప్రతిస్పందన సమయం",
+            "statusGood": "మంచిది"
+        },
+        "nav": {
+            "dashboard": "డాష్‌బోర్డ్",
+            "aiInsights": "AI అంతర్దృష్టులు",
+            "incidents": "సంఘటనలు",
+            "analytics": "అనలిటిక్స్"
+        },
+        "timeAgo": {
+            "justNow": "ఇప్పుడే",
+            "minsAgo": "{{count}} నిమిషాల క్రితం",
+            "hoursAgo": "{{count}} గంటల క్రితం",
+            "daysAgo": "{{count}} రోజుల క్రితం"
         }
     },
     "ngo": {
@@ -201,11 +229,26 @@
     "companion": {
         "title": "Finding Your Companion",
         "foundMessage": "We found someone you may enjoy talking to.",
+        "searchingMessage": "Please wait a moment...",
         "language": "Language",
         "interest": "Shared Interest",
+        "availability": "Availability",
         "available": "Available Now",
+        "location": "Location",
+        "peopleHelped": "People Helped",
+        "seniorsHelped": "{{count}}+ seniors",
+        "verified": "Verified",
         "voiceCall": "Voice Call",
-        "textChat": "Text Chat"
+        "textChat": "Text Chat",
+        "findAnother": "Find Another Companion",
+        "emergency": {
+            "title": "🚨 Safety & Emergency",
+            "sosAlert": "SOS Alert",
+            "ambulance": "Ambulance",
+            "police": "Police",
+            "nationalEmergency": "National Emergency",
+            "seniorHelpline": "Senior Citizen Helpline"
+        }
     },
     "chat": {
         "placeholder": "Type a message...",
@@ -235,7 +278,8 @@
         "statusSent": "Request Sent",
         "statusResponding": "Someone is responding",
         "statusMessage": "Help is on the way. You are not alone.",
-        "callHelper": "Call Helper"
+        "callHelper": "Call Helper",
+        "reassuringMessage": "Don't worry, we are here to help you. Take your time."
     },
     "sos": {
         "title": "Emergency",
@@ -243,7 +287,18 @@
         "voiceHint": "Say \"Help\" anytime",
         "escalationInfo": "Emergency contacts will be notified",
         "cancel": "Cancel",
-        "confirmCancel": "Are you sure you want to cancel?"
+        "confirmCancel": "Are you sure you want to cancel?",
+        "sendingStatus": "Sending in {{count}} seconds...",
+        "pressHold": "Press and hold for emergency",
+        "alertSent": "SOS Alert Sent!",
+        "alertSentDesc": "Emergency contacts have been notified. Help is on the way.",
+        "quickCall": "Quick Call:",
+        "emergency": "Emergency",
+        "police": "Police",
+        "ambulance": "Ambulance",
+        "emergencyNumbers": "Emergency Numbers:",
+        "stayCalm": "🙏 Stay calm. Someone will call you shortly.",
+        "returnHome": "Return to Home"
     },
     "profile": {
         "title": "Profile",

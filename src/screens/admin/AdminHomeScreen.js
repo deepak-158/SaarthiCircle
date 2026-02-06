@@ -166,10 +166,10 @@ const AdminHomeScreen = ({ navigation }) => {
     const hours = Math.floor(diff / (1000 * 60 * 60));
     const days = Math.floor(diff / (1000 * 60 * 60 * 24));
 
-    if (minutes < 1) return 'Just now';
-    if (minutes < 60) return `${minutes} mins ago`;
-    if (hours < 24) return `${hours} hours ago`;
-    return `${days} days ago`;
+    if (minutes < 1) return t('admin.timeAgo.justNow');
+    if (minutes < 60) return t('admin.timeAgo.minsAgo', { count: minutes });
+    if (hours < 24) return t('admin.timeAgo.hoursAgo', { count: hours });
+    return t('admin.timeAgo.daysAgo', { count: days });
   };
 
   const onRefresh = async () => {
@@ -256,8 +256,8 @@ const AdminHomeScreen = ({ navigation }) => {
               color={colors.neutral.white}
             />
             <View style={styles.sosContent}>
-              <Text style={styles.sosTitle}>{stats.sosAlerts} Active SOS Alerts</Text>
-              <Text style={styles.sosSubtitle}>Tap to view and manage</Text>
+              <Text style={styles.sosTitle}>{t('admin.sos.activeSOS', { count: stats.sosAlerts })}</Text>
+              <Text style={styles.sosSubtitle}>{t('admin.sos.manageSOSDesc')}</Text>
             </View>
             <MaterialCommunityIcons
               name="chevron-right"
@@ -326,7 +326,7 @@ const AdminHomeScreen = ({ navigation }) => {
               />
             </View>
             <Text style={styles.actionTitle}>{t('admin.actions.aiRisk')}</Text>
-            <Text style={styles.actionSubtitle}>View wellness insights</Text>
+            <Text style={styles.actionSubtitle}>{t('admin.actionSubtitles.viewWellness')}</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -341,7 +341,7 @@ const AdminHomeScreen = ({ navigation }) => {
               />
             </View>
             <Text style={styles.actionTitle}>{t('admin.actions.incidents')}</Text>
-            <Text style={styles.actionSubtitle}>Track escalations</Text>
+            <Text style={styles.actionSubtitle}>{t('admin.actionSubtitles.trackEscalations')}</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -356,7 +356,7 @@ const AdminHomeScreen = ({ navigation }) => {
               />
             </View>
             <Text style={styles.actionTitle}>{t('admin.actions.analytics')}</Text>
-            <Text style={styles.actionSubtitle}>View reports</Text>
+            <Text style={styles.actionSubtitle}>{t('admin.actionSubtitles.viewReports')}</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -371,7 +371,7 @@ const AdminHomeScreen = ({ navigation }) => {
               />
             </View>
             <Text style={styles.actionTitle}>{t('admin.actions.users')}</Text>
-            <Text style={styles.actionSubtitle}>Manage users</Text>
+            <Text style={styles.actionSubtitle}>{t('admin.actionSubtitles.manageUsers')}</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -386,7 +386,7 @@ const AdminHomeScreen = ({ navigation }) => {
               />
             </View>
             <Text style={styles.actionTitle}>{t('admin.actions.volunteers')}</Text>
-            <Text style={styles.actionSubtitle}>Review applications</Text>
+            <Text style={styles.actionSubtitle}>{t('admin.actionSubtitles.reviewApps')}</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -401,7 +401,7 @@ const AdminHomeScreen = ({ navigation }) => {
               />
             </View>
             <Text style={styles.actionTitle}>{t('admin.actions.ngo')}</Text>
-            <Text style={styles.actionSubtitle}>Review NGO applications</Text>
+            <Text style={styles.actionSubtitle}>{t('admin.actionSubtitles.reviewNGOs')}</Text>
           </TouchableOpacity>
         </View>
 
@@ -449,11 +449,11 @@ const AdminHomeScreen = ({ navigation }) => {
               color={colors.secondary.green}
             />
             <View style={styles.responseContent}>
-              <Text style={styles.responseLabel}>Avg. Response Time</Text>
+              <Text style={styles.responseLabel}>{t('admin.responseTime.label')}</Text>
               <Text style={styles.responseValue}>{stats.avgResponseTime}</Text>
             </View>
           </View>
-          <Text style={styles.responseStatus}>Good</Text>
+          <Text style={styles.responseStatus}>{t('admin.responseTime.statusGood')}</Text>
         </View>
       </ScrollView>
 
@@ -465,7 +465,7 @@ const AdminHomeScreen = ({ navigation }) => {
             size={26}
             color={colors.primary.main}
           />
-          <Text style={[styles.navLabel, styles.navLabelActive]}>Dashboard</Text>
+          <Text style={[styles.navLabel, styles.navLabelActive]}>{t('admin.nav.dashboard')}</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -477,7 +477,7 @@ const AdminHomeScreen = ({ navigation }) => {
             size={26}
             color={colors.neutral.gray}
           />
-          <Text style={styles.navLabel}>AI Insights</Text>
+          <Text style={styles.navLabel}>{t('admin.nav.aiInsights')}</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -489,7 +489,7 @@ const AdminHomeScreen = ({ navigation }) => {
             size={26}
             color={colors.neutral.gray}
           />
-          <Text style={styles.navLabel}>Incidents</Text>
+          <Text style={styles.navLabel}>{t('admin.nav.incidents')}</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -501,7 +501,7 @@ const AdminHomeScreen = ({ navigation }) => {
             size={26}
             color={colors.neutral.gray}
           />
-          <Text style={styles.navLabel}>Analytics</Text>
+          <Text style={styles.navLabel}>{t('admin.nav.analytics')}</Text>
         </TouchableOpacity>
       </View>
     </SafeAreaView>
