@@ -17,6 +17,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { LargeButton, AccessibleInput } from '../../components/common';
 import { colors, typography, spacing, borderRadius, shadows } from '../../theme';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Audio } from 'expo-av';
 import { BACKEND_URL as API_BASE } from '../../config/backend';
 import { useChat } from '../../context/ChatContext';
 import { getSocket } from '../../services/socketService';
@@ -29,6 +30,47 @@ const CaregiverInteractionScreen = ({ navigation, route }) => {
 
   const [notes, setNotes] = useState('');
   const [status, setStatus] = useState('in_progress');
+  const [sound, setSound] = useState(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+
+  // Audio Playback
+  const playVoiceMessage = async (uri) => {
+    try {
+      if (sound) {
+        await sound.unloadAsync();
+      }
+
+      console.log('[AUDIO] Playing voice message:', uri);
+      setIsPlaying(true);
+
+      const { sound: newSound } = await Audio.Sound.createAsync(
+        { uri },
+        { shouldPlay: true }
+      );
+
+      setSound(newSound);
+
+      newSound.setOnPlaybackStatusUpdate((status) => {
+        if (status.didJustFinish) {
+          setIsPlaying(false);
+          newSound.unloadAsync();
+        }
+      });
+    } catch (error) {
+      console.error('[AUDIO-ERROR] Failed to play sound:', error);
+      setIsPlaying(false);
+      Alert.alert('Playback Error', 'Could not play the voice message.');
+    }
+  };
+
+  // Cleanup sound on unmount
+  React.useEffect(() => {
+    return () => {
+      if (sound) {
+        sound.unloadAsync();
+      }
+    };
+  }, [sound]);
 
   // Use actual request data if available, otherwise use default
   const seniorDetails = request ? {
@@ -40,6 +82,8 @@ const CaregiverInteractionScreen = ({ navigation, route }) => {
     helpType: request.helpType || request.category || 'Help Request',
     description: request.description || request.message || 'Needs assistance',
     medicalInfo: request.senior?.medicalInfo || 'Not provided',
+    hasAudio: request.hasAudio || request.raw?.has_audio || !!(request.audioUri || request.audio_uri || request.raw?.audio_uri),
+    audioUri: request.audioUri || request.audio_uri || request.raw?.audio_uri,
   } : {
     name: 'Sharma Ji',
     age: 72,
@@ -49,6 +93,7 @@ const CaregiverInteractionScreen = ({ navigation, route }) => {
     helpType: 'Daily Assistance',
     description: 'Needs help with medicine pickup from nearby pharmacy',
     medicalInfo: 'Diabetes, Blood Pressure',
+    hasAudio: false,
   };
 
   const handleCall = () => {
@@ -508,6 +553,26 @@ const CaregiverInteractionScreen = ({ navigation, route }) => {
               <Text style={styles.detailValue}>{seniorDetails.description}</Text>
             </View>
           </View>
+
+          {/* Voice Preview Section for Volunteers */}
+          {seniorDetails.hasAudio && seniorDetails.audioUri && (
+            <View style={styles.voiceSection}>
+              <Text style={styles.detailLabel}>Voice Message</Text>
+              <TouchableOpacity
+                style={styles.playButton}
+                onPress={() => playVoiceMessage(seniorDetails.audioUri)}
+              >
+                <MaterialCommunityIcons
+                  name={isPlaying ? "stop-circle" : "play-circle"}
+                  size={32}
+                  color={colors.primary.main}
+                />
+                <Text style={styles.playText}>
+                  {isPlaying ? "Playing..." : "Listen to Request"}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          )}
         </View>
 
         {/* Contact Information */}
@@ -811,6 +876,26 @@ const styles = StyleSheet.create({
     color: colors.accent.red,
     fontWeight: typography.weights.medium,
     marginLeft: spacing.sm,
+  },
+  voiceSection: {
+    marginTop: spacing.md,
+    paddingTop: spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: colors.neutral.lightGray,
+  },
+  playButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.primary.light + '40',
+    padding: spacing.sm,
+    borderRadius: borderRadius.md,
+    marginTop: spacing.xs,
+  },
+  playText: {
+    marginLeft: spacing.sm,
+    fontSize: typography.sizes.md,
+    fontWeight: typography.weights.semiBold,
+    color: colors.primary.main,
   },
 });
 

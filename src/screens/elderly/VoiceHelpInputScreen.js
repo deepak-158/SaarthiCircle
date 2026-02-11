@@ -205,12 +205,32 @@ const VoiceHelpInputScreen = ({ navigation, route }) => {
     }
   };
 
+  const uriToBase64 = async (uri) => {
+    try {
+      const response = await fetch(uri);
+      const blob = await response.blob();
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          const base64String = reader.result.split(',')[1];
+          resolve(base64String);
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      });
+    } catch (e) {
+      console.error('[HELP-REQUEST] Failed to convert URI to base64:', e);
+      return null;
+    }
+  };
+
   const handleSubmit = async () => {
     console.log('[HELP-REQUEST] Button clicked!');
     try {
       const trimmedMessage = message.trim();
       console.log('[HELP-REQUEST] Message:', trimmedMessage);
       console.log('[HELP-REQUEST] Has recording:', hasRecording);
+      console.log('[HELP-REQUEST] Audio URI:', audioUri);
 
       if (!trimmedMessage && !hasRecording) {
         console.warn('[HELP-REQUEST] No message or recording');
@@ -220,6 +240,30 @@ const VoiceHelpInputScreen = ({ navigation, route }) => {
 
       console.log('[HELP-REQUEST] Setting processing to true');
       setIsProcessing(true);
+
+      let remoteAudioUrl = null;
+      if (hasRecording && audioUri) {
+        console.log('[HELP-REQUEST] Uploading audio to server...');
+        const base64Audio = await uriToBase64(audioUri);
+        if (base64Audio) {
+          const uploadResp = await fetch(`${BACKEND_URL}/upload-audio`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              audio: base64Audio,
+              extension: Platform.OS === 'web' ? 'webm' : 'm4a'
+            })
+          });
+
+          if (uploadResp.ok) {
+            const uploadData = await uploadResp.json();
+            remoteAudioUrl = uploadData.url;
+            console.log('[HELP-REQUEST] Audio uploaded successfully:', remoteAudioUrl);
+          } else {
+            console.error('[HELP-REQUEST] Audio upload failed');
+          }
+        }
+      }
 
       console.log('[HELP-REQUEST] Getting user data from AsyncStorage...');
       const token = await AsyncStorage.getItem('userToken');
@@ -258,7 +302,7 @@ const VoiceHelpInputScreen = ({ navigation, route }) => {
         categoryTitle: t(category?.titleKey) || category?.title || 'Help Request',
         description: trimmedMessage || 'Voice message',
         hasAudio: hasRecording,
-        audioUri: audioUri,
+        audioUri: remoteAudioUrl || audioUri,
         language: i18n.language || 'en',
         timestamp: new Date().toISOString(),
         status: 'pending',

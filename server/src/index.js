@@ -7,17 +7,59 @@ import { supabase, TABLES } from './supabase.js';
 import nodemailer from 'nodemailer';
 import jwt from 'jsonwebtoken';
 import { randomUUID } from 'crypto';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
 const app = express();
 app.use(cors({ origin: '*' }));
-app.use(express.json());
+app.use(express.json({ limit: '50mb' })); // Increase limit for base64 audio
+
+// Serve uploaded files statically
+const uploadsDir = path.join(__dirname, '..', 'public', 'uploads');
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
+app.use('/uploads', express.static(uploadsDir));
 
 // Log all requests
 app.use((req, res, next) => {
   console.log(`[REQUEST] ${req.method} ${req.url} - ${new Date().toISOString()}`);
   if (req.method === 'POST' || req.method === 'PUT') {
-    console.log(`[BODY] ${req.url}:`, JSON.stringify(req.body));
+    // Don't log huge bodies (like base64 audio)
+    if (req.url === '/upload-audio') {
+      console.log(`[BODY] ${req.url}: <binary data>`);
+    } else {
+      console.log(`[BODY] ${req.url}:`, JSON.stringify(req.body));
+    }
   }
   next();
+});
+
+// Audio Upload Endpoint
+app.post('/upload-audio', async (req, res) => {
+  try {
+    const { audio, extension = 'm4a' } = req.body;
+    if (!audio) return res.status(400).json({ error: 'No audio data' });
+
+    const fileName = `voice_${Date.now()}_${randomUUID()}.${extension}`;
+    const filePath = path.join(uploadsDir, fileName);
+
+    // Convert base64 to buffer
+    const buffer = Buffer.from(audio, 'base64');
+    fs.writeFileSync(filePath, buffer);
+
+    const publicUrl = `${req.protocol}://${req.get('host')}/uploads/${fileName}`;
+    console.log(`[UPLOAD] Audio saved to ${filePath}, public URL: ${publicUrl}`);
+
+    res.json({ url: publicUrl });
+  } catch (error) {
+    console.error('[UPLOAD-ERROR]', error);
+    res.status(500).json({ error: error.message });
+  }
 });
 
 const server = http.createServer(app);
