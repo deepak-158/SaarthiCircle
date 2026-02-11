@@ -21,7 +21,7 @@ if (Platform.OS !== 'web') {
     RTCIceCandidate = webrtcModule.RTCIceCandidate;
     RTCSessionDescription = webrtcModule.RTCSessionDescription;
     mediaDevices = webrtcModule.mediaDevices;
-    
+
     // Register WebRTC globals on native platforms only
     webrtcModule.registerGlobals();
   } catch (error) {
@@ -36,6 +36,7 @@ class WebRTCService {
     this.remoteStream = null;
     this.isMuted = false;
     this.isSpeakerOn = true;
+    this.iceCandidatesQueue = [];
   }
 
   // Initialize WebRTC and get local audio stream
@@ -61,14 +62,7 @@ class WebRTCService {
 
       // Get media constraints for audio only
       const mediaConstraints = {
-        audio: {
-          mandatory: {
-            minHeight: 480,
-            minWidth: 640,
-            minFrameRate: 30,
-          },
-          optional: [{ maxHeight: 480 }],
-        },
+        audio: true,
         video: false,
       };
 
@@ -172,6 +166,20 @@ class WebRTCService {
     }
   }
 
+  async processQueuedIceCandidates() {
+    if (!this.peerConnection || !this.peerConnection.remoteDescription) return;
+
+    console.log(`[WEBRTC] Processing ${this.iceCandidatesQueue.length} queued ICE candidates`);
+    while (this.iceCandidatesQueue.length > 0) {
+      const candidate = this.iceCandidatesQueue.shift();
+      try {
+        await this.peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+      } catch (error) {
+        console.error('[WEBRTC] Error adding queued ICE candidate:', error);
+      }
+    }
+  }
+
   // Create and send answer
   async createAnswer(offer) {
     try {
@@ -183,6 +191,9 @@ class WebRTCService {
       await this.peerConnection.setRemoteDescription(
         new RTCSessionDescription(offer)
       );
+
+      // Process any ICE candidates that arrived before the offer
+      await this.processQueuedIceCandidates();
 
       const answer = await this.peerConnection.createAnswer({
         offerToReceiveAudio: true,
@@ -210,6 +221,10 @@ class WebRTCService {
       await this.peerConnection.setRemoteDescription(
         new RTCSessionDescription(answer)
       );
+
+      // Process any ICE candidates that arrived before the answer
+      await this.processQueuedIceCandidates();
+
       console.log('[WEBRTC] Remote description set');
     } catch (error) {
       console.error('[WEBRTC] Error handling answer:', error);
@@ -225,10 +240,15 @@ class WebRTCService {
       }
 
       if (candidate) {
-        console.log('[WEBRTC] Adding ICE candidate');
-        await this.peerConnection.addIceCandidate(
-          new RTCIceCandidate(candidate)
-        );
+        if (this.peerConnection.remoteDescription) {
+          console.log('[WEBRTC] Adding ICE candidate');
+          await this.peerConnection.addIceCandidate(
+            new RTCIceCandidate(candidate)
+          );
+        } else {
+          console.log('[WEBRTC] Remote description not set, queuing ICE candidate');
+          this.iceCandidatesQueue.push(candidate);
+        }
       }
     } catch (error) {
       console.error('[WEBRTC] Error adding ICE candidate:', error);
@@ -295,6 +315,7 @@ class WebRTCService {
 
       this.remoteStream = null;
       this.isMuted = false;
+      this.iceCandidatesQueue = [];
 
       console.log('[WEBRTC] Connection closed');
     } catch (error) {

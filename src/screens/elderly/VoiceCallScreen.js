@@ -72,7 +72,7 @@ const VoiceCallScreen = ({ navigation, route }) => {
   const [callDuration, setCallDuration] = useState(0);
   const [isMuted, setIsMuted] = useState(false);
   const [isSpeakerOn, setIsSpeakerOn] = useState(true);
-  const [callStatus, setCallStatus] = useState(isIncoming ? 'incoming' : 'initiating');
+  const [callStatus, setCallStatus] = useState(isIncoming ? 'active' : 'initiating');
   const [errorMessage, setErrorMessage] = useState(null);
   const [isConnecting, setIsConnecting] = useState(true);
   const [appState, setAppState] = useState(AppState.currentState);
@@ -529,7 +529,7 @@ const VoiceCallScreen = ({ navigation, route }) => {
               <>
                 <TouchableOpacity
                   style={[styles.controlButton, styles.acceptButton]}
-                  onPress={handleEndCall}
+                  onPress={() => setCallStatus('active')}
                   activeOpacity={0.7}
                 >
                   <MaterialCommunityIcons

@@ -287,10 +287,46 @@ const CompanionMatchingScreen = ({ navigation }) => {
       return;
     }
     (async () => {
-      const cid = await getOrCreateConversationId(companion);
-      startSession({ conversationId: cid, companion });
-      setCallStatus(true);
-      navigation.navigate('Chat', { mode: 'voice', companion, conversationId: cid });
+      try {
+        const cid = await getOrCreateConversationId(companion);
+
+        // Get current user ID
+        const profileJson = await AsyncStorage.getItem('userProfile');
+        const profile = profileJson ? JSON.parse(profileJson) : null;
+        const seniorId = profile?.id || profile?.uid || profile?.userId;
+
+        if (!seniorId) {
+          Alert.alert('Error', 'User profile not found. Please log in again.');
+          return;
+        }
+
+        // 1. Start session in context
+        startSession({ conversationId: cid, companion });
+
+        // 2. Initiate call via socket
+        const socket = getSocket();
+        if (socket) {
+          socket.emit('call:initiate', {
+            conversationId: cid,
+            callerId: seniorId,
+            calleeId: companion.id,
+            callerName: profile?.fullName || profile?.name || 'Senior User',
+          });
+        }
+
+        // 3. Navigate to VoiceCall screen
+        navigation.navigate('VoiceCall', {
+          conversationId: cid,
+          companion,
+          callerId: seniorId,
+          calleeId: companion.id,
+          isIncoming: false,
+        });
+
+      } catch (error) {
+        console.error('Error starting voice call:', error);
+        Alert.alert('Error', 'Could not initiate voice call. Please try again.');
+      }
     })();
   };
 

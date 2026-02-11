@@ -96,24 +96,88 @@ const CaregiverInteractionScreen = ({ navigation, route }) => {
     hasAudio: false,
   };
 
+  const handleInAppCall = async () => {
+    if (!conversationId || !seniorId) {
+      Alert.alert('Notice', 'In-app calling requires an active conversation session. Please use Normal Phone Call if this is urgent.');
+      return;
+    }
+
+    try {
+      const profileJson = await AsyncStorage.getItem('userProfile');
+      const profile = profileJson ? JSON.parse(profileJson) : null;
+      const userId = profile?.id || profile?.uid || profile?.userId;
+
+      if (!userId) {
+        Alert.alert('Error', 'User profile not found. Please log in again.');
+        return;
+      }
+
+      console.log('[CALL] Initiating in-app call:', {
+        conversationId,
+        callerId: userId,
+        calleeId: seniorId,
+      });
+
+      // 1. Initiate call via socket
+      const socket = getSocket();
+      if (socket) {
+        socket.emit('call:initiate', {
+          conversationId,
+          callerId: userId,
+          calleeId: seniorId,
+          callerName: profile?.fullName || profile?.name || 'Volunteer',
+        });
+      }
+
+      // 2. Navigate to VoiceCall screen
+      navigation.navigate('VoiceCall', {
+        conversationId,
+        companion: { id: seniorId, name: seniorDetails.name },
+        callerId: userId,
+        calleeId: seniorId,
+        isIncoming: false,
+      });
+    } catch (error) {
+      console.error('[CALL-ERROR] Failed to start in-app call:', error);
+      Alert.alert('Error', 'Could not initiate in-app call. Please try again or use Normal Phone Call.');
+    }
+  };
+
   const handleCall = () => {
     const phoneNumber = seniorDetails.phone.replace(/\s/g, '');
-    const phoneUrl = Platform.OS === 'ios'
-      ? `telprompt:${phoneNumber}`
-      : `tel:${phoneNumber}`;
 
-    Linking.canOpenURL(phoneUrl)
-      .then(supported => {
-        if (supported) {
-          return Linking.openURL(phoneUrl);
-        } else {
-          Alert.alert('Error', 'Phone calls are not supported on this device');
-        }
-      })
-      .catch(err => {
-        console.error('Call error:', err);
-        Alert.alert('Error', 'Could not initiate call');
-      });
+    Alert.alert(
+      t('caregiver.interaction.call'),
+      'Select how you want to call:',
+      [
+        {
+          text: 'Live In-App Call',
+          onPress: handleInAppCall,
+        },
+        {
+          text: 'Normal Phone Call',
+          onPress: () => {
+            const phoneUrl = Platform.OS === 'ios'
+              ? `telprompt:${phoneNumber}`
+              : `tel:${phoneNumber}`;
+
+            Linking.canOpenURL(phoneUrl)
+              .then(supported => {
+                if (supported) {
+                  return Linking.openURL(phoneUrl);
+                } else {
+                  Alert.alert('Error', 'Phone calls are not supported on this device');
+                }
+              })
+              .catch(err => {
+                console.error('Call error:', err);
+                Alert.alert('Error', 'Could not initiate call');
+              });
+          }
+        },
+        { text: 'Cancel', style: 'cancel' }
+      ]
+    );
   };
 
   const handleChat = () => {

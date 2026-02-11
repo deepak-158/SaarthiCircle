@@ -14,6 +14,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LargeButton, MoodSelector, VoiceButton } from '../../components/common';
 import { colors, typography, spacing, borderRadius, shadows } from '../../theme';
+import useIncomingCallListener from '../../hooks/useIncomingCallListener';
 
 // Default profile data if user data not available
 const DEFAULT_PROFILE = {
@@ -27,6 +28,9 @@ const HomeScreen = ({ navigation }) => {
   const [currentMood, setCurrentMood] = useState(null);
   const [userProfile, setUserProfile] = useState(DEFAULT_PROFILE);
   const [greeting, setGreeting] = useState('');
+
+  // Listen for incoming calls
+  useIncomingCallListener();
 
   useEffect(() => {
     loadUserProfile();

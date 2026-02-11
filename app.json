@@ -19,7 +19,11 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.saathicircle.app",
-      "icon": "./assets/icon.png"
+      "icon": "./assets/icon.png",
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "Allow SaathiCircle to access your microphone for voice calls with companions.",
+        "NSCameraUsageDescription": "Allow SaathiCircle to access your camera if needed for video calls."
+      }
     },
     "android": {
       "package": "com.saathicircle.app",
@@ -33,6 +37,18 @@
         "android.permission.CALL_PHONE"
       ]
     },
+    "plugins": [
+      [
+        "@config-plugins/react-native-webrtc",
+        {
+          "appleAudioConfiguration": {
+            "category": "PlayAndRecord",
+            "mode": "VoiceChat",
+            "active": true
+          }
+        }
+      ]
+    ],
     "extra": {
       "eas": {
         "projectId": "b64793a3-799f-4739-811e-737ebe1bb6b3"

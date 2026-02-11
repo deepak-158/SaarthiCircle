@@ -2884,9 +2884,10 @@ app.post('/ngo/requests/:id/assign-volunteer', ensureNgo, async (req, res) => {
       })
       .eq('id', id)
       .select()
-      .single();
+      .maybeSingle();
 
     if (updateError) throw updateError;
+    if (!updatedRequest) return res.status(404).json({ error: 'Help request not found' });
 
     emitAdminUpdate({ type: 'help_request', action: 'assigned_by_ngo', request: updatedRequest, ngoId: req.user.id });
     emitNgoUpdate({ ngoId: req.user.id, type: 'help_request', action: 'assigned', request: updatedRequest });
@@ -2955,8 +2956,9 @@ app.post('/ngo/requests/:id/handled', ensureNgo, async (req, res) => {
       })
       .eq('id', id)
       .select()
-      .single();
+      .maybeSingle();
     if (error) throw error;
+    if (!data) return res.status(404).json({ error: 'Request not found' });
 
     emitAdminUpdate({ type: 'help_request', action: 'handled_by_ngo', request: data, ngoId: req.user.id });
     emitNgoUpdate({ ngoId: req.user.id, type: 'help_request', action: 'handled', request: data });
@@ -2979,8 +2981,9 @@ app.post('/ngo/requests/:id/close', ensureNgo, async (req, res) => {
       .update({ status: 'completed', completed_at: now, updated_at: now })
       .eq('id', id)
       .select()
-      .single();
+      .maybeSingle();
     if (error) throw error;
+    if (!data) return res.status(404).json({ error: 'Request not found' });
     emitAdminUpdate({ type: 'help_request', action: 'closed_by_ngo', request: data, ngoId: req.user.id });
     emitNgoUpdate({ ngoId: req.user.id, type: 'help_request', action: 'closed', request: data });
     await logNgoActivity({ ngoId: req.user.id, action: 'close_case', entityType: 'help_request', entityId: id, details: { resolution } });
@@ -3012,8 +3015,9 @@ app.post('/ngo/requests/:id/reject', ensureNgo, async (req, res) => {
       .update({ status: 'cancelled', description: nextDescription, updated_at: now })
       .eq('id', id)
       .select()
-      .single();
+      .maybeSingle();
     if (error) throw error;
+    if (!data) return res.status(404).json({ error: 'Request not found' });
 
     emitAdminUpdate({ type: 'help_request', action: 'rejected_by_ngo', request: data, ngoId: req.user.id });
     emitNgoUpdate({ ngoId: req.user.id, type: 'help_request', action: 'rejected', request: data });
@@ -3322,7 +3326,7 @@ app.post('/ngo/emergencies/:id/close', ensureNgo, async (req, res) => {
       .update({ status: 'resolved', resolution: String(notes || ''), resolved_at: now })
       .eq('id', id)
       .select()
-      .single();
+      .maybeSingle();
 
     if (error) {
       if (isTableMissingError(error)) {
@@ -3334,6 +3338,7 @@ app.post('/ngo/emergencies/:id/close', ensureNgo, async (req, res) => {
       }
       throw error;
     }
+    if (!data) return res.status(404).json({ error: 'Emergency alert not found' });
 
     emitAdminUpdate({ type: 'sos_alert', action: 'closed_by_ngo', alert: data, ngoId: req.user.id });
     emitNgoUpdate({ ngoId: req.user.id, type: 'sos_alert', action: 'closed', alert: data });
@@ -3696,9 +3701,10 @@ app.post('/sos-alerts/:id/resolve', ensureAuth, async (req, res) => {
       .update({ status: 'resolved', resolved_at: now, resolution: String(notes || '') })
       .eq('id', id)
       .select()
-      .single();
+      .maybeSingle();
 
     if (error) throw error;
+    if (!data) return res.status(404).json({ error: 'SOS alert not found or already resolved' });
 
     clearSosEscalationTimer(id);
     clearSosMultiStageTimers(id);
@@ -3744,7 +3750,7 @@ app.post('/sos-alerts/:id/escalate', ensureAuth, async (req, res) => {
       })
       .eq('id', id)
       .select()
-      .single();
+      .maybeSingle();
 
     if (error) {
       // Fallback: DB might not allow 'escalated' status, just mark metadata
@@ -4672,9 +4678,12 @@ app.put('/help-requests/:id/complete', ensureAuth, async (req, res) => {
       .eq('id', id)
       .eq('volunteer_id', req.user.id)
       .select()
-      .single();
+      .maybeSingle();
 
     if (error) throw error;
+    if (!data) {
+      return res.status(404).json({ error: 'Request not found or not assigned to you' });
+    }
     emitAdminUpdate({ type: 'help_request', action: 'completed', request: data });
     res.json({ request: data });
   } catch (e) {
