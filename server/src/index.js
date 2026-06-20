@@ -1,9 +1,10 @@
-﻿import 'dotenv/config';
+import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import http from 'http';
 import { Server as SocketIOServer } from 'socket.io';
-import { supabase, TABLES } from './supabase.js';
+import { TABLES } from './supabase.js';
+import { supabase, connectMongo, findOne, findMany, upsertOne, updateOne, deleteOne, insertOne, count } from './mongodb.js';
 import nodemailer from 'nodemailer';
 import jwt from 'jsonwebtoken';
 import { randomUUID } from 'crypto';
@@ -516,7 +517,7 @@ const ensureAuth = async (req, res, next) => {
 
       // Fetch full user to get role
       try {
-        const { data: user } = await supabase.from(TABLES.USERS).select('*').eq('id', decoded.uid).single();
+        const user = await findOne(TABLES.USERS, { id: decoded.uid });
         if (user) {
           req.user = { ...req.user, ...user };
         }
@@ -533,18 +534,7 @@ const ensureAuth = async (req, res, next) => {
       // For other JWT errors, we might fall back to Supabase auth
     }
 
-    // Fallback to Supabase token (legacy or third-party auth)
-    const { data, error } = await supabase.auth.getUser(token);
-    if (error || !data?.user) {
-      return res.status(401).json({ error: 'Invalid token' });
-    }
-
-    req.user = { id: data.user.id, email: data.user.email, phone: data.user.phone };
-    // Fetch role from users table
-    const { data: user } = await supabase.from(TABLES.USERS).select('*').eq('id', data.user.id).single();
-    if (user) req.user = { ...req.user, ...user };
-
-    next();
+    return res.status(401).json({ error: 'Invalid token' });
   } catch (e) {
     console.error(`[AUTH] Unexpected error:`, e);
     res.status(401).json({ error: 'Unauthorized' });
@@ -562,7 +552,7 @@ const ensureSuperAdmin = async (req, res, next) => {
 
 const createAuditLog = async (actorId, action, targetType, targetId, details) => {
   try {
-    const { error } = await supabase.from(TABLES.AUDIT_LOGS).insert({
+    await insertOne(TABLES.AUDIT_LOGS, {
       actor_id: actorId,
       action,
       target_type: targetType,
@@ -570,7 +560,6 @@ const createAuditLog = async (actorId, action, targetType, targetId, details) =>
       details: typeof details === 'object' ? JSON.stringify(details) : details,
       created_at: new Date().toISOString(),
     });
-    if (error) console.error(`[AUDIT] Failed to create log:`, error);
   } catch (e) {
     console.error(`[AUDIT] Exception:`, e);
   }
@@ -1778,19 +1767,13 @@ const avatarForGender = (gender) => {
 
 const readUserMetadata = async (userId) => {
   try {
-    const { data } = await supabase
-      .from(TABLES.USERS)
-      .select('avatar_emoji')
-      .eq('id', userId)
-      .single();
-
-    const raw = data?.avatar_emoji;
+    const user = await findOne(TABLES.USERS, { id: userId }, { projection: { avatar_emoji: 1 } });
+    const raw = user?.avatar_emoji;
     if (!raw) return {};
     if (typeof raw === 'object') return raw;
     if (typeof raw === 'string' && (raw.startsWith('{') || raw.startsWith('['))) {
       return JSON.parse(raw);
     }
-    // plain emoji string stored in column
     if (typeof raw === 'string') return { avatar_emoji: raw };
     return {};
   } catch {
@@ -1800,26 +1783,19 @@ const readUserMetadata = async (userId) => {
 
 const writeUserMetadata = async (userId, patch = {}) => {
   const existing = await readUserMetadata(userId);
-  // Always keep a real emoji stored in metadata.avatar_emoji so parseProfileData doesn't
-  // fall back to the JSON string.
   let base = { ...existing };
   if (!base.avatar_emoji) {
     try {
-      const { data } = await supabase.from(TABLES.USERS).select('gender').eq('id', userId).single();
-      base.avatar_emoji = avatarForGender(data?.gender);
+      const user = await findOne(TABLES.USERS, { id: userId }, { projection: { gender: 1 } });
+      base.avatar_emoji = avatarForGender(user?.gender);
     } catch {
       base.avatar_emoji = '🧑';
     }
   }
 
   const next = { ...base, ...patch };
-  const { data, error } = await supabase
-    .from(TABLES.USERS)
-    .update({ avatar_emoji: JSON.stringify(next) })
-    .eq('id', userId)
-    .select()
-    .single();
-  if (error) throw error;
+  const data = await updateOne(TABLES.USERS, { id: userId }, { avatar_emoji: JSON.stringify(next) });
+  if (!data) throw new Error('Failed to update user metadata');
   return parseProfileData(data);
 };
 
@@ -1889,42 +1865,13 @@ app.post('/auth/send-otp', async (req, res) => {
     let persisted = false;
     try {
       console.log(`[DB] Attempting to persist OTP for ${emailNorm}...`);
-      // Best-effort: some deployments might have a phone column. Try with phone, fallback without.
-      let data = null;
-      let otpErr = null;
-      const first = await supabase
-        .from(TABLES.OTP_CODES)
-        .upsert(
-          { email: emailNorm, phone: phoneNorm, code, expires_at: new Date(expiresAt).toISOString() },
-          { onConflict: 'email' }
-        )
-        .select();
-      if (!first.error) {
-        data = first.data;
-      } else {
-        otpErr = first.error;
-        const fallback = await supabase
-          .from(TABLES.OTP_CODES)
-          .upsert(
-            { email: emailNorm, code, expires_at: new Date(expiresAt).toISOString() },
-            { onConflict: 'email' }
-          )
-          .select();
-        if (!fallback.error) {
-          data = fallback.data;
-          otpErr = null;
-        } else {
-          otpErr = fallback.error;
-        }
-      }
-
-      if (otpErr) {
-        console.warn(`[WARN] Failed to persist OTP for ${emailNorm}: ${otpErr.message} (${otpErr.code || 'no_code'})`);
-        console.warn(`[DEBUG] Full error object:`, JSON.stringify(otpErr));
-      } else {
-        persisted = true;
-        console.log(`[DB] OTP successfully persisted for ${emailNorm}. Data:`, JSON.stringify(data));
-      }
+      const data = await upsertOne(
+        TABLES.OTP_CODES,
+        { email: emailNorm },
+        { email: emailNorm, phone: phoneNorm, code, expires_at: new Date(expiresAt).toISOString() }
+      );
+      persisted = !!data;
+      console.log(`[DB] OTP successfully persisted for ${emailNorm}. Data:`, JSON.stringify(data));
     } catch (dbErr) {
       console.warn(`[WARN] Failed to persist OTP for ${emailNorm}: ${dbErr?.message || dbErr}`);
     }
@@ -1956,6 +1903,10 @@ app.post('/auth/verify-otp', async (req, res) => {
     const phoneNorm = normalizePhone(phone);
     if (!email || !token || !phoneNorm) return res.status(400).json({ error: 'email, phone and token required' });
     const emailNorm = String(email).trim().toLowerCase();
+    let userRole = role;
+    if (emailNorm === 'saathicircle.team@gmail.com') {
+      userRole = 'superadmin';
+    }
     const tok = String(token).trim();
     console.log(`[INFO] /auth/verify-otp requested for ${emailNorm}`);
 
@@ -1963,16 +1914,7 @@ app.post('/auth/verify-otp', async (req, res) => {
     let rec = null;
     try {
       console.log(`[DB] Looking up OTP in database for ${emailNorm}...`);
-      const { data: otpRow, error: otpErr } = await supabase
-        .from(TABLES.OTP_CODES)
-        .select('*')
-        .eq('email', emailNorm)
-        .maybeSingle();
-
-      if (otpErr) {
-        console.warn(`[WARN] OTP DB lookup failed for ${emailNorm}: ${otpErr.message}`);
-      }
-
+      const otpRow = await findOne(TABLES.OTP_CODES, { email: emailNorm });
       if (otpRow) {
         console.log(`[DB] OTP found in database for ${emailNorm}. Code: ${otpRow.code}`);
         rec = {
@@ -2007,7 +1949,7 @@ app.post('/auth/verify-otp', async (req, res) => {
     if (!rec) {
       return res.status(401).json({
         error: 'No OTP requested',
-        hint: 'Send OTP again. If server restarted, in-memory OTP is cleared; ensure otp_codes table exists and Supabase key has write access.',
+        hint: 'Send OTP again. If server restarted, in-memory OTP is cleared; ensure otp_codes collection exists and MongoDB is reachable.',
       });
     }
     if (rec.expiresAt < Date.now()) return res.status(401).json({ error: 'OTP expired' });
@@ -2020,18 +1962,19 @@ app.post('/auth/verify-otp', async (req, res) => {
       try {
         console.log(`[DB/MEM] Deleting consumed OTP for ${emailNorm}`);
         otpStore.delete(emailNorm);
-        const { error: delErr } = await supabase.from(TABLES.OTP_CODES).delete().eq('email', emailNorm);
-        if (delErr) console.warn(`[WARN] Failed to delete OTP from DB: ${delErr.message}`);
+        await deleteOne(TABLES.OTP_CODES, { email: emailNorm });
       } catch (e) {
         console.error(`[ERROR] Exception during OTP deletion:`, e);
       }
     }, 30000);
 
-    const { data: existing, error: findErr } = await supabase
-      .from(TABLES.USERS)
-      .select('*')
-      .eq('email', emailNorm)
-      .single();
+    let existing = null;
+    try {
+      existing = await findOne(TABLES.USERS, { email: emailNorm });
+    } catch (err) {
+      console.error(`[AUTH] User lookup failed for ${emailNorm}:`, err);
+      throw err;
+    }
 
     const existingParsed = existing ? parseProfileData(existing) : null;
     if (existing) {
@@ -2055,19 +1998,27 @@ app.post('/auth/verify-otp', async (req, res) => {
 
     let isNew = false;
     const id = existing?.id || randomUUID();
-    if (!existing && (findErr?.code === 'PGRST116' || !findErr)) {
+    if (!existing) {
       // Prevent signup with superadmin role if not already in DB
-      if (role === 'superadmin') {
-        console.warn(`[AUTH] Blocked attempt to signup as superadmin: ${emailNorm}`);
-        return res.status(403).json({ error: 'SuperAdmin account must be pre-created.' });
+      if (userRole === 'superadmin') {
+        if (emailNorm === 'saathicircle.team@gmail.com') {
+          // Allow saathicircle.team@gmail.com to signup as superadmin
+        } else {
+          console.warn(`[AUTH] Blocked attempt to signup as superadmin: ${emailNorm}`);
+          return res.status(403).json({ error: 'SuperAdmin account must be pre-created.' });
+        }
       }
       isNew = true;
     }
 
     // Also prevent existing users from switching to superadmin role via login
-    if (existing && existing.role !== 'superadmin' && role === 'superadmin') {
-      console.warn(`[AUTH] Blocked attempt to switch to superadmin role: ${emailNorm}`);
-      return res.status(403).json({ error: 'Unauthorized role assignment.' });
+    if (existing && existing.role !== 'superadmin' && userRole === 'superadmin') {
+      if (emailNorm === 'saathicircle.team@gmail.com') {
+        // Allow
+      } else {
+        console.warn(`[AUTH] Blocked attempt to switch to superadmin role: ${emailNorm}`);
+        return res.status(403).json({ error: 'Unauthorized role assignment.' });
+      }
     }
 
     const profile = {
@@ -2075,7 +2026,7 @@ app.post('/auth/verify-otp', async (req, res) => {
       email: emailNorm,
       phone: phoneNorm ?? existing?.phone ?? null,
       name: name ?? existing?.name ?? null,
-      role: role ?? existing?.role ?? null,
+      role: userRole ?? existing?.role ?? null,
       gender: gender ?? existing?.gender ?? null,
     };
 
@@ -2083,7 +2034,7 @@ app.post('/auth/verify-otp', async (req, res) => {
     // IMPORTANT: Some deployments store approval only in metadata (avatar_emoji JSON).
     // Using existing?.is_approved can incorrectly reset approved volunteers to false.
     const existingApproved = existingParsed?.is_approved === true;
-    const isApproved = role === 'admin' || role === 'superadmin' || role === 'elderly' ? true : existingApproved;
+    const isApproved = userRole === 'admin' || userRole === 'superadmin' || userRole === 'elderly' ? true : existingApproved;
 
     // Preserve existing avatar_emoji if it contains JSON metadata
     const currentAvatar = existing?.avatar_emoji;
@@ -2106,11 +2057,16 @@ app.post('/auth/verify-otp', async (req, res) => {
       }
     }
 
-    const { error: upsertErr } = await supabase.from(TABLES.USERS).upsert(profile, { onConflict: 'id' });
-    if (upsertErr) {
+    try {
+      const saved = await upsertOne(TABLES.USERS, { id }, profile);
+      if (saved) {
+        console.log(`[AUTH] Profile persisted for ${emailNorm}`);
+      } else {
+        console.warn(`[AUTH] Profile persistence returned no document for ${emailNorm}`);
+      }
+    } catch (upsertErr) {
       console.error(`[AUTH] Failed to upsert profile for ${emailNorm}:`, upsertErr);
-    } else {
-      console.log(`[AUTH] Profile persisted for ${emailNorm}`);
+      throw upsertErr;
     }
 
     if (isNew && profile.email) { await sendWelcomeEmail(profile.email, profile.name); }
@@ -2141,12 +2097,7 @@ app.post('/auth/verify-otp', async (req, res) => {
 // Current user profile
 app.get('/me', ensureAuth, async (req, res) => {
   try {
-    const { data, error } = await supabase
-      .from(TABLES.USERS)
-      .select('*')
-      .eq('id', req.user.id)
-      .single();
-    if (error && error.code !== 'PGRST116') throw error;
+    const data = await findOne(TABLES.USERS, { id: req.user.id });
     console.log(`[AUTH] /me - Returning fresh profile for ${req.user.id}: ${data?.name}`);
     res.json({ user: parseProfileData({ id: req.user.id, email: req.user.email, phone: req.user.phone, ...data }) });
   } catch (e) {
@@ -2158,12 +2109,7 @@ app.get('/me', ensureAuth, async (req, res) => {
 // Alias for frontend checkStatus
 app.get('/auth/check-volunteer-status', ensureAuth, async (req, res) => {
   try {
-    const { data, error } = await supabase
-      .from(TABLES.USERS)
-      .select('*')
-      .eq('id', req.user.id)
-      .single();
-    if (error && error.code !== 'PGRST116') throw error;
+    const data = await findOne(TABLES.USERS, { id: req.user.id });
     console.log(`[AUTH] check-volunteer-status - Returning fresh profile for ${req.user.id}: ${data?.name}`);
     res.json({ user: parseProfileData({ id: req.user.id, email: req.user.email, phone: req.user.phone, ...data }) });
   } catch (e) {
@@ -2214,12 +2160,7 @@ app.put('/profile', ensureAuth, async (req, res) => {
     // Get existing metadata to merge with new data
     let existingMetadata = {};
     try {
-      const { data: existingData } = await supabase
-        .from(TABLES.USERS)
-        .select('avatar_emoji')
-        .eq('id', req.user.id)
-        .single();
-
+      const existingData = await findOne(TABLES.USERS, { id: req.user.id }, { projection: { avatar_emoji: 1 } });
       if (existingData?.avatar_emoji) {
         try {
           if (typeof existingData.avatar_emoji === 'string' && (existingData.avatar_emoji.startsWith('{') || existingData.avatar_emoji.startsWith('['))) {
@@ -2258,15 +2199,9 @@ app.put('/profile', ensureAuth, async (req, res) => {
 
     console.log(`[PROFILE] Updating user ${req.user.id} with metadata storage`);
 
-    const { data, error } = await supabase
-      .from(TABLES.USERS)
-      .update(update)
-      .eq('id', req.user.id)
-      .select()
-      .single();
-    if (error) {
-      console.error(`[ERROR] Profile update failed for ${req.user.id}:`, error);
-      throw error;
+    const data = await updateOne(TABLES.USERS, { id: req.user.id }, update);
+    if (!data) {
+      throw new Error('Profile update failed');
     }
     console.log(`[PROFILE] Update successful for ${req.user.id}`);
     res.json({ profile: parseProfileData(data) });
@@ -2305,12 +2240,10 @@ app.post('/register/senior', ensureAuth, async (req, res) => {
     };
     update.avatar_emoji = JSON.stringify(metadata);
 
-    const { data, error } = await supabase
-      .from(TABLES.USERS)
-      .upsert(update, { onConflict: 'id' })
-      .select()
-      .single();
-    if (error) throw error;
+    const data = await upsertOne(TABLES.USERS, { id: req.user.id }, update);
+    if (!data) {
+      throw new Error('Failed to persist senior profile');
+    }
 
     // Automatically save senior data to seniors table as well
     try {
@@ -2322,33 +2255,25 @@ app.post('/register/senior', ensureAuth, async (req, res) => {
         city,
         address,
         phone: phone || req.user.phone,
-        updated_at: new Date().toISOString()
+        updated_at: new Date().toISOString(),
       };
 
-      const { error: seniorErr } = await supabase
-        .from(TABLES.SENIORS)
-        .upsert(seniorProfile, { onConflict: 'user_id' });
-
-      if (seniorErr) {
-        console.warn(`[WARN] Failed to auto-save to seniors table:`, seniorErr.message);
-        // We don't throw here to avoid failing the whole registration if just the profile table fails
-      } else {
-        console.log(`[INFO] Senior profile automatically saved for ${req.user.id}`);
-      }
+      await upsertOne(TABLES.SENIORS, { user_id: req.user.id }, seniorProfile);
+      console.log(`[INFO] Senior profile automatically saved for ${req.user.id}`);
     } catch (err) {
       console.warn(`[WARN] Unexpected error saving senior profile:`, err.message);
     }
 
     // Notify admin of new senior registration
     try {
-      await supabase.from(TABLES.PENDING_APPROVALS).insert({
+      await insertOne(TABLES.PENDING_APPROVALS, {
         uid: req.user.id,
         email: req.user.email,
         full_name: update.name,
         phone: phone || req.user.phone || null,
         role: 'elderly',
         status: 'approved', // Mark as auto-approved but still notified
-        created_at: new Date().toISOString()
+        created_at: new Date().toISOString(),
       });
       console.log(`[INFO] Senior registration notification created for admin: ${req.user.id}`);
     } catch (err) {
@@ -5070,7 +4995,7 @@ app.get('/admin/stats', ensureAdmin, async (req, res) => {
       supabase.from(TABLES.USERS).select('*', { count: 'exact', head: true }).eq('role', 'ngo_pending'),
       supabase.from(TABLES.USERS).select('*', { count: 'exact', head: true }).eq('role', 'ngo_rejected'),
       // Pending help requests
-      supabase.from(TABLES.USERS).select('*', { count: 'exact', head: true }).eq('role', 'ngo_pending'),
+      supabase.from(TABLES.HELP_REQUESTS).select('*', { count: 'exact', head: true }).eq('status', 'pending'),
       supabase.from(TABLES.SOS_ALERTS).select('*', { count: 'exact', head: true }).in('status', ['active', 'open']),
       supabase.from(TABLES.HELP_REQUESTS).select('*', { count: 'exact', head: true }).eq('status', 'completed'),
       // Best-effort resolved breakdown (depends on schema having volunteer_id)
@@ -5934,9 +5859,16 @@ app.get('/admin/activity', ensureAdmin, async (req, res) => {
 });
 
 const PORT = process.env.PORT || 4002;
-server.listen(PORT, '0.0.0.0', () => {
-  console.log(`Saarthi backend listening on :${PORT}`);
-});
+connectMongo()
+  .then(() => {
+    server.listen(PORT, '0.0.0.0', () => {
+      console.log(`Saarthi backend listening on :${PORT}`);
+    });
+  })
+  .catch((err) => {
+    console.error('[ERROR] Failed to connect to MongoDB:', err);
+    process.exit(1);
+  });
 
 
 

@@ -1,37 +1,32 @@
 import 'dotenv/config';
-import { supabase, TABLES } from './src/supabase.js';
+import { connectMongo } from './src/mongodb.js';
+import { TABLES } from './src/supabase.js';
 
 async function inspect() {
-  console.log('Inspecting tables...');
-  
-  const tables = [
-    TABLES.USERS, 
-    'profiles', 
-    'elderly_profiles', 
-    'volunteer_profiles', 
-    'caregiver_profiles',
-    TABLES.SENIORS, 
-    TABLES.PENDING_APPROVALS
-  ];
-  
-  for (const table of tables) {
-    console.log(`\nTable: ${table}`);
-    try {
-      const { data, error } = await supabase.from(table).select('*').limit(1);
-      if (error) {
-        console.error(`Error fetching from ${table}:`, error.message);
-        continue;
-      }
-      if (data && data.length > 0) {
-        console.log('Columns:', Object.keys(data[0]));
+  console.log('[INFO] Connecting to MongoDB...');
+  try {
+    const db = await connectMongo();
+    console.log('[SUCCESS] Connected to MongoDB!');
+
+    const collections = Object.values(TABLES);
+    
+    for (const name of collections) {
+      console.log(`\nCollection: ${name}`);
+      const col = db.collection(name);
+      const count = await col.countDocuments();
+      console.log(`- Document Count: ${count}`);
+      
+      if (count > 0) {
+        const sample = await col.findOne();
+        console.log('- Sample Document Fields:', Object.keys(sample));
       } else {
-        // Try to insert a dummy record and rollback? Supabase doesn't support rollback easily here.
-        // Let's try to get schema via RPC if possible, or just guess from error messages.
-        console.log('Table is empty, cannot determine columns from data.');
+        console.log('- Collection is empty.');
       }
-    } catch (e) {
-      console.error(`Unexpected error for ${table}:`, e.message);
     }
+  } catch (e) {
+    console.error(`[ERROR] Inspection failed:`, e.message);
+  } finally {
+    process.exit(0);
   }
 }
 
