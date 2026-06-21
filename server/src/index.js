@@ -337,6 +337,8 @@ const transporter = nodemailer.createTransport({
   port: Number(process.env.SMTP_PORT || 587),
   secure: false,
   auth: process.env.SMTP_USER ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS } : undefined,
+  connectionTimeout: 3000, // 3 seconds timeout
+  socketTimeout: 3000,     // 3 seconds timeout
 });
 const FROM_ADDRESS = process.env.SMTP_FROM || 'SaathiCircle <no-reply@saathicircle.local>';
 
@@ -1880,11 +1882,10 @@ app.post('/auth/send-otp', async (req, res) => {
     } else {
       console.warn(`[WARN] OTP NOT persisted for ${emailNorm} (will rely on in-memory store)`);
     }
-    try {
-      await sendOtpEmail(emailNorm, code, name);
-    } catch (mailErr) {
+    // Send email asynchronously in the background so it doesn't block the API response
+    sendOtpEmail(emailNorm, code, name).catch((mailErr) => {
       console.warn(`[WARN] sendOtpEmail failed for ${emailNorm}: ${mailErr?.message || mailErr}`);
-    }
+    });
     if ((process.env.NODE_ENV || 'development') !== 'production') {
       return res.json({ sent: true, channel: 'email', devCode: code, persisted });
     }
@@ -2069,7 +2070,12 @@ app.post('/auth/verify-otp', async (req, res) => {
       throw upsertErr;
     }
 
-    if (isNew && profile.email) { await sendWelcomeEmail(profile.email, profile.name); }
+    if (isNew && profile.email) {
+      // Send welcome email asynchronously in the background so it doesn't block the API response
+      sendWelcomeEmail(profile.email, profile.name).catch((mailErr) => {
+        console.warn(`[WARN] sendWelcomeEmail failed for ${profile.email}: ${mailErr?.message || mailErr}`);
+      });
+    }
 
     const access_token = jwt.sign({ uid: id, email: emailNorm }, process.env.JWT_SECRET || 'dev_secret_change_me', { expiresIn: '7d' });
 

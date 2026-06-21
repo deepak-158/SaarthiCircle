@@ -47,7 +47,8 @@
             "active": true
           }
         }
-      ]
+      ],
+      "./plugins/withExpoModulesCorePatch"
     ],
     "extra": {
       "eas": {

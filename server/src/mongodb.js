@@ -29,11 +29,11 @@ const loadFallback = () => {
 };
 
 const saveFallback = () => {
-  try {
-    fs.writeFileSync(fallbackFile, JSON.stringify(fallbackDb, null, 2), 'utf8');
-  } catch (e) {
-    console.error('Failed to save fallback DB:', e.message);
-  }
+  fs.writeFile(fallbackFile, JSON.stringify(fallbackDb), 'utf8', (err) => {
+    if (err) {
+      console.error('Failed to save fallback DB:', err.message);
+    }
+  });
 };
 
 const mockDb = {
