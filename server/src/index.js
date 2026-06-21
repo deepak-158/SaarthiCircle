@@ -350,6 +350,33 @@ const sendOtpEmail = async (to, code, name) => {
     <div style="font-size:32px; letter-spacing:8px; font-weight:700; background:#f5f5f5; padding:12px 16px; border-radius:8px; display:inline-block">${code}</div>
     <p style="margin:16px 0 0; color:#555">This code expires in 10 minutes. If you didn’t request this, you can ignore this email.</p>
   </div>`;
+
+  if (process.env.RESEND_API_KEY) {
+    try {
+      const response = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${process.env.RESEND_API_KEY}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          from: process.env.RESEND_FROM || 'SaathiCircle <onboarding@resend.dev>',
+          to,
+          subject: 'Your SaathiCircle Sign-in Code',
+          html
+        })
+      });
+      if (response.ok) {
+        console.log(`[INFO] Email sent successfully via Resend to ${to}`);
+        return;
+      }
+      const errText = await response.text();
+      console.warn(`[WARN] Resend API returned error: ${response.status} - ${errText}. Trying SMTP fallback...`);
+    } catch (apiErr) {
+      console.warn(`[WARN] Resend API request failed: ${apiErr.message}. Trying SMTP fallback...`);
+    }
+  }
+
   await transporter.sendMail({ from: FROM_ADDRESS, to, subject: 'Your SaathiCircle Sign-in Code', html });
 };
 
@@ -360,6 +387,33 @@ const sendWelcomeEmail = async (to, name) => {
     <p style="margin:0 0 12px">${name ? `Hi ${name},` : 'Hello,'} we're excited to have you on board.</p>
     <p style="margin:0 0 0; color:#555">Connect, care, and build companionship. We're here for you.</p>
   </div>`;
+
+  if (process.env.RESEND_API_KEY) {
+    try {
+      const response = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${process.env.RESEND_API_KEY}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          from: process.env.RESEND_FROM || 'SaathiCircle <onboarding@resend.dev>',
+          to,
+          subject: 'Welcome to SaathiCircle',
+          html
+        })
+      });
+      if (response.ok) {
+        console.log(`[INFO] Welcome email sent successfully via Resend to ${to}`);
+        return;
+      }
+      const errText = await response.text();
+      console.warn(`[WARN] Resend API returned error: ${response.status} - ${errText}. Trying SMTP fallback...`);
+    } catch (apiErr) {
+      console.warn(`[WARN] Resend API request failed: ${apiErr.message}. Trying SMTP fallback...`);
+    }
+  }
+
   await transporter.sendMail({ from: FROM_ADDRESS, to, subject: 'Welcome to SaathiCircle', html });
 };
 
