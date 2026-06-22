@@ -48,7 +48,15 @@
           }
         }
       ],
-      "./plugins/withExpoModulesCorePatch"
+      "./plugins/withExpoModulesCorePatch",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "minSdkVersion": 24
+          }
+        }
+      ]
     ],
     "extra": {
       "eas": {
